@@ -1,0 +1,11 @@
+venv/
+node_modules/
+.git/
+.vscode/
+data/
+geolens.db
+__pycache__/
+*.pyc
+.env
+geolens-ui/node_modules/
+geolens-ui/dist/
