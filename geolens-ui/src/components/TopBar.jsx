@@ -37,15 +37,15 @@ export default function TopBar() {
       {/* Center Status */}
       <div className="flex items-center gap-6 text-sm font-mono text-mc-muted">
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-mc-success animate-pulse-ring"></div>
+          <div className="w-2 h-2 rounded-full bg-mc-success animate-pulse-ring" />
           <span>{t('SYSTEM ONLINE')}</span>
         </div>
         <div className="flex items-center gap-2">
-          <Activity size={16} className="text-mc-primary" />
-          <span>{t('REGION: GLOBAL')}</span>
+          <Activity size={15} className="text-mc-primary" />
+          <span className="text-mc-primary font-semibold">5 AGENTS ACTIVE</span>
         </div>
         <div className="flex items-center gap-2 text-mc-secondary">
-          <span>{t('SOURCES: NASA, ESA, OSM')}</span>
+          <span>{t('SOURCES: NASA · ESA · OSM')}</span>
         </div>
       </div>
 

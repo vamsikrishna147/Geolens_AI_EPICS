@@ -3,6 +3,7 @@
 
 # ── Core AI Framework ─────────────────────────────
 crewai[tools,google-genai]>=0.100.0
+langchain-google-genai>=1.0.0
 
 # ── Environment & Config ──────────────────────────
 python-dotenv>=1.0.0

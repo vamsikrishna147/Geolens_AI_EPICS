@@ -1,10 +1,46 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 import { X, Clock, Map, Settings2, Target, MapPin, Play, Loader2, MessageSquare, BarChart2, Flame, Droplets, Building2, Leaf } from 'lucide-react';
+import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import { useMission } from '../context/MissionContext';
 import AssistantChat from './AssistantChat';
 
 const API = 'http://localhost:8000';
+
+// ── Map Synchronization Hook ──────────────────────────────────────────────
+function MapSync({ center, zoom, onMove }) {
+  const map = useMap();
+  const isUpdating = useRef(false);
+
+  useEffect(() => {
+    if (isUpdating.current) return;
+    const currentCenter = map.getCenter();
+    if (
+      Math.abs(currentCenter.lat - center[0]) > 0.0001 ||
+      Math.abs(currentCenter.lng - center[1]) > 0.0001 ||
+      map.getZoom() !== zoom
+    ) {
+      map.setView(center, zoom, { animate: false });
+    }
+  }, [center, zoom, map]);
+
+  useMapEvents({
+    move() {
+      isUpdating.current = true;
+      const c = map.getCenter();
+      onMove([c.lat, c.lng], map.getZoom());
+      setTimeout(() => { isUpdating.current = false; }, 50);
+    },
+    zoom() {
+      isUpdating.current = true;
+      const c = map.getCenter();
+      onMove([c.lat, c.lng], map.getZoom());
+      setTimeout(() => { isUpdating.current = false; }, 50);
+    }
+  });
+
+  return null;
+}
 
 // ── Severity pill colours ─────────────────────────────────────────────────
 const SEVERITY_COLORS = {
@@ -301,6 +337,9 @@ export default function TimeLensCompare({ onClose }) {
   const [imgAfter,  setImgAfter]            = useState('https://images.unsplash.com/photo-1463116666993-9c8df6e08216?auto=format&fit=crop&q=80&w=1200');
   const [isFetchingImages, setIsFetchingImages] = useState(false);
   const [resolvedLocation, setResolvedLocation] = useState('');
+  
+  const [mapCenter, setMapCenter] = useState([20, 0]);
+  const [mapZoom, setMapZoom] = useState(3);
 
   const locStr = locMode === 'place' ? location : `${lat}, ${lng}`;
 
@@ -314,17 +353,29 @@ export default function TimeLensCompare({ onClose }) {
         setImgBefore(data.url_before);
         setImgAfter(data.url_after);
         setResolvedLocation(data.location);
+        if (data.bounds && data.bounds.length === 4) {
+          const [minLng, minLat, maxLng, maxLat] = data.bounds;
+          setMapCenter([(minLat + maxLat) / 2, (minLng + maxLng) / 2]);
+          setMapZoom(11); // Set a good default zoom for areas
+        }
       } else {
-        alert('Failed to fetch satellite imagery: ' + (data.detail || 'Unknown error'));
+        console.warn('Failed to fetch satellite imagery:', data.detail);
       }
     } catch (e) {
-      alert('Error connecting to backend API. Is the server running?');
+      console.warn('Error connecting to backend API:', e);
     } finally {
       setIsFetchingImages(false);
       setShowConfig(false);
-      const query = `Compare satellite imagery of ${locStr} between ${yearBefore} and ${yearAfter}, analyze temporal changes and land use differences`;
-      executeDirective(query);
+      // ⬆ NOTE: We do NOT auto-trigger executeDirective here.
+      // The user must explicitly click "Run Full AI Analysis" below.
     }
+  };
+
+  // Separate function — only called when user explicitly clicks "Analyze" button
+  const handleRunFullAnalysis = () => {
+    if (!locStr.trim() || isExecuting) return;
+    const query = `Compare satellite imagery of ${locStr} between ${yearBefore} and ${yearAfter}, analyze temporal changes and land use differences`;
+    executeDirective(query);
   };
 
   const time_lens = finalReport?.official_report?.time_lens || {
@@ -456,18 +507,39 @@ export default function TimeLensCompare({ onClose }) {
 
         {/* === IMAGERY TAB === */}
         {activeTab === 'imagery' && (
-          isFetchingImages ? (
-            <div className="w-full h-full flex flex-col items-center justify-center gap-4 bg-mc-bg/50">
-              <Loader2 size={48} className="animate-spin text-mc-primary" />
-              <p className="font-mono text-mc-text tracking-widest uppercase animate-pulse">Requesting Earth Engine Telemetry...</p>
-            </div>
-          ) : (
+          <div className="relative w-full h-full">
+            {/* Always show the compare slider — never black screen */}
             <ReactCompareSlider
-              itemOne={<ReactCompareSliderImage src={imgBefore} alt="Before" style={{ objectFit: 'cover', width: '100%', height: '100%' }} />}
-              itemTwo={<ReactCompareSliderImage src={imgAfter}  alt="After"  style={{ objectFit: 'cover', width: '100%', height: '100%' }} />}
+              itemOne={
+                imgBefore.includes('{z}') ? (
+                  <MapContainer center={mapCenter} zoom={mapZoom} zoomControl={false} style={{ width: '100%', height: '100%' }}>
+                    <TileLayer url={imgBefore} />
+                    <MapSync center={mapCenter} zoom={mapZoom} onMove={(c, z) => { setMapCenter(c); setMapZoom(z); }} />
+                  </MapContainer>
+                ) : (
+                  <ReactCompareSliderImage src={imgBefore} alt="Before" style={{ objectFit: 'cover', width: '100%', height: '100%' }} />
+                )
+              }
+              itemTwo={
+                imgAfter.includes('{z}') ? (
+                  <MapContainer center={mapCenter} zoom={mapZoom} zoomControl={false} style={{ width: '100%', height: '100%' }}>
+                    <TileLayer url={imgAfter} />
+                    <MapSync center={mapCenter} zoom={mapZoom} onMove={(c, z) => { setMapCenter(c); setMapZoom(z); }} />
+                  </MapContainer>
+                ) : (
+                  <ReactCompareSliderImage src={imgAfter} alt="After" style={{ objectFit: 'cover', width: '100%', height: '100%' }} />
+                )
+              }
               className="w-full h-full"
             />
-          )
+            {/* Subtle loading overlay — doesn't hide the slider */}
+            {isFetchingImages && (
+              <div className="absolute inset-0 bg-mc-bg/70 backdrop-blur-sm flex flex-col items-center justify-center gap-4 z-20">
+                <Loader2 size={48} className="animate-spin text-mc-primary" />
+                <p className="font-mono text-mc-text tracking-widest uppercase animate-pulse">Requesting Earth Engine Telemetry...</p>
+              </div>
+            )}
+          </div>
         )}
 
         {/* === ANALYSIS TABS (CVA / Flood / Wildfire) === */}
@@ -497,12 +569,25 @@ export default function TimeLensCompare({ onClose }) {
 
         {/* Intelligence Brief — imagery tab only */}
         {activeTab === 'imagery' && (
-          <div className="absolute bottom-8 left-8 bg-mc-panel/90 backdrop-blur-md border border-mc-border p-5 rounded-xl shadow-2xl max-w-sm pointer-events-none">
+          <div className="absolute bottom-8 left-8 bg-mc-panel/90 backdrop-blur-md border border-mc-border p-5 rounded-xl shadow-2xl max-w-sm z-10">
             <div className="flex items-center gap-2 mb-2">
               <Map className="text-mc-primary" size={16} />
               <h3 className="font-heading text-xs text-mc-text uppercase tracking-widest">Intelligence Brief</h3>
             </div>
-            <p className="text-mc-muted text-xs font-body leading-relaxed">{time_lens.brief}</p>
+            <p className="text-mc-muted text-xs font-body leading-relaxed mb-4">{time_lens.brief}</p>
+            {/* Explicit trigger — user must click this to fire agents */}
+            {resolvedLocation && (
+              <button
+                onClick={handleRunFullAnalysis}
+                disabled={isExecuting}
+                className="w-full py-2 bg-mc-primary/20 border border-mc-primary/50 text-mc-primary font-mono text-xs rounded-lg hover:bg-mc-primary/30 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isExecuting
+                  ? <><Loader2 size={12} className="animate-spin" /> RUNNING AI ANALYSIS...</>
+                  : <><Play size={12} fill="currentColor" /> RUN FULL AI ANALYSIS</>
+                }
+              </button>
+            )}
           </div>
         )}
 

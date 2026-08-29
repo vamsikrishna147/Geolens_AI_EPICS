@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Send, Command, Sparkles, Loader2, Plus, X, ChevronUp } from 'lucide-react';
+import { Send, Command, Sparkles, Loader2, Plus, X, ChevronUp, Maximize2, Minimize2, Layers } from 'lucide-react';
 import { useMission } from '../context/MissionContext';
 import { useLanguage } from '../context/LanguageContext';
 
 export default function BottomCommand() {
   const [query, setQuery] = useState('');
   const [isLogOpen, setIsLogOpen] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
   const { isExecuting, logs, executeDirective } = useMission();
   const { t } = useLanguage();
 
@@ -36,29 +37,34 @@ export default function BottomCommand() {
 
       {/* Chatbot Output Area */}
       {logs.length > 0 && isLogOpen && (
-        <div className="skeuo-panel p-4 max-h-48 overflow-y-auto font-mono text-sm border-t-[3px] border-mc-primary relative shadow-lg">
-          <div className="sticky -top-4 -mx-4 -mt-4 px-4 pt-4 bg-mc-panel/95 backdrop-blur pb-2 mb-3 border-b border-mc-border flex items-center justify-between z-10">
+        <div className={`skeuo-panel flex flex-col font-mono text-sm border-t-[3px] border-mc-primary relative shadow-lg transition-all duration-300 ${isExpanded ? 'h-[60vh] max-h-[800px]' : 'max-h-64'}`}>
+          <div className="px-4 py-3 bg-mc-panel border-b border-mc-border flex items-center justify-between rounded-t-lg shrink-0">
             <div className="flex items-center gap-2">
               <Command size={14} className="text-mc-primary" />
               <span className="text-xs font-bold text-mc-primary tracking-widest uppercase">{t('Mission Log')}</span>
             </div>
-            <button onClick={() => setIsLogOpen(false)} className="text-mc-muted hover:text-mc-text p-1 rounded-md transition-colors bg-mc-bg/50 hover:bg-mc-bg">
-              <X size={14} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setIsExpanded(!isExpanded)} className="text-mc-muted hover:text-mc-text p-1.5 rounded-md transition-colors bg-mc-bg/50 hover:bg-mc-bg">
+                {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
+              <button onClick={() => setIsLogOpen(false)} className="text-mc-muted hover:text-mc-danger p-1.5 rounded-md transition-colors bg-mc-bg/50 hover:bg-mc-bg">
+                <X size={14} />
+              </button>
+            </div>
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="p-4 flex-1 overflow-auto flex flex-col gap-1.5">
             {logs.map((log, i) => {
               const isError = log.includes('CRITICAL') || log.includes('Failed');
               return (
                  <div key={i} className={`flex gap-3 leading-relaxed ${isError ? 'text-mc-danger bg-mc-danger/10 px-2 py-1 rounded' : log.startsWith('>') ? 'text-mc-primary' : 'text-mc-text'}`}>
-                    <span className="opacity-40 select-none text-xs mt-0.5">[{new Date().toLocaleTimeString([], {hour12:false})}]</span>
-                    <span>{log.replace('>', '').trim()}</span>
+                    <span className="opacity-40 select-none text-xs mt-0.5 shrink-0">[{new Date().toLocaleTimeString([], {hour12:false})}]</span>
+                    <span className="whitespace-pre-wrap break-words">{log.replace('>', '').trim()}</span>
                  </div>
               );
             })}
             {isExecuting && (
-              <div className="flex items-center gap-2 text-mc-secondary mt-3 bg-mc-primary/10 p-2.5 rounded-lg border border-mc-primary/20 animate-pulse">
-                <Loader2 size={14} className="animate-spin" />
+              <div className="flex items-center gap-2 text-mc-secondary mt-3 bg-mc-primary/10 p-2.5 rounded-lg border border-mc-primary/20 animate-pulse shrink-0">
+                <Loader2 size={14} className="animate-spin shrink-0" />
                 <span className="tracking-wide">{t('AI Assistant is processing telemetry...')}</span>
               </div>
             )}
@@ -107,8 +113,40 @@ export default function BottomCommand() {
           <button onClick={() => setQuery("Detect flood affected regions in Assam")} className="px-3 py-1 rounded-full skeuo-button hover:text-mc-text transition-colors">
             {t('Detect flood affected regions')}
           </button>
+          <button onClick={() => document.getElementById('imagery-modal').classList.toggle('hidden')} className="px-3 py-1 rounded-full skeuo-button text-mc-primary hover:text-white hover:bg-mc-primary/20 border border-mc-primary transition-colors flex items-center gap-1">
+            <Layers size={12} />
+            {t('Retrieve Satellite Imagery')}
+          </button>
         </div>
       )}
+
+      {/* Satellite Imagery Popup Modal */}
+      <div id="imagery-modal" className="hidden absolute bottom-[100%] right-0 mb-4 bg-[#11161F] border-2 border-mc-primary rounded-xl p-4 shadow-2xl w-72 z-50 animate-in fade-in slide-in-from-bottom-2">
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="text-mc-primary font-mono text-sm tracking-wider uppercase font-bold flex items-center gap-2">
+            <Layers size={14} /> Retrieve Imagery
+          </h3>
+          <button onClick={() => document.getElementById('imagery-modal').classList.add('hidden')} className="text-mc-muted hover:text-mc-danger">
+            <X size={14} />
+          </button>
+        </div>
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          const loc = e.target.location.value;
+          const yr = e.target.year.value;
+          if(loc) {
+             window.dispatchEvent(new CustomEvent('retrieve-imagery', { detail: { location: loc, year: yr } }));
+             document.getElementById('imagery-modal').classList.add('hidden');
+          }
+        }} className="flex flex-col gap-3">
+          <input name="location" type="text" required placeholder="Location or Coordinates" className="w-full bg-[#0A0D14] border border-mc-border rounded p-2 text-sm text-mc-text outline-none focus:border-mc-primary" />
+          <input name="year" type="number" defaultValue={2024} placeholder="Year" className="w-full bg-[#0A0D14] border border-mc-border rounded p-2 text-sm text-mc-text outline-none focus:border-mc-primary" />
+          <button type="submit" className="w-full bg-mc-primary text-white py-2 rounded-lg font-mono text-xs tracking-wider uppercase hover:bg-opacity-80 transition-colors">
+            Fetch Maps
+          </button>
+        </form>
+      </div>
+
     </div>
   );
 }

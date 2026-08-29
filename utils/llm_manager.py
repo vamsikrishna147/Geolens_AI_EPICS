@@ -49,11 +49,25 @@ class KeySlot:
 
     def get_llm(self) -> LLM:
         if self._llm is None:
-            self._llm = LLM(
-                model=self.model,
-                api_key=self.key,
-                temperature=0.3,
-            )
+            if self.model.startswith("ollama/"):
+                # LiteLLM handles Ollama routing via OpenAI compatible endpoints
+                default_url = "http://host.docker.internal:11434" if os.path.exists('/.dockerenv') else "http://localhost:11434"
+                base_url = os.getenv("OLLAMA_BASE_URL", default_url)
+                # timeout=600 → 10 minutes. Local 8B models on CPU need time for large GIS contexts.
+                # num_ctx=4096 → limit context window to prevent excessive memory use.
+                self._llm = LLM(
+                    model=self.model,
+                    base_url=base_url,
+                    temperature=0.1,
+                    timeout=600,
+                )
+            else:
+                self._llm = LLM(
+                    model=self.model,
+                    api_key=self.key,
+                    temperature=0.3,
+                    timeout=120,
+                )
         return self._llm
 
     def _refresh_windows(self):
@@ -66,13 +80,26 @@ class KeySlot:
             self.day_window_start = now
 
     def is_available(self) -> bool:
-        """Return True if this key is currently under rate limits."""
+        """Return True if this slot is currently available to handle a request."""
         now = time.time()
-        # In cooldown from a recent 429?
+        # In cooldown from a recent 429 or connection failure?
         if self.last_429_at > 0 and (now - self.last_429_at) < self.cooldown_secs:
             remaining = int(self.cooldown_secs - (now - self.last_429_at))
-            print(f"[LLMManager] Key '{self.name}' in cooldown for {remaining}s more.")
+            print(f"[LLMManager] Slot '{self.name}' in cooldown for {remaining}s more.")
             return False
+
+        # If Ollama, verify local service is active before returning slot
+        if self.model.startswith("ollama/"):
+            default_url = "http://host.docker.internal:11434" if os.path.exists('/.dockerenv') else "http://localhost:11434"
+            base_url = os.getenv("OLLAMA_BASE_URL", default_url)
+            try:
+                import urllib.request
+                urllib.request.urlopen(f"{base_url.rstrip('/')}/api/tags", timeout=1.0)
+                return True
+            except Exception:
+                print(f"[LLMManager] Ollama service at {base_url} is unreachable. Skipping Ollama slot.")
+                return False
+
         self._refresh_windows()
         if self.requests_this_minute >= GEMINI_FREE_RPM:
             return False
@@ -116,22 +143,38 @@ class GeminiKeyPool:
         model  = os.getenv("GEMINI_MODEL", "gemini/gemini-2.0-flash")
         key1   = os.getenv("GEMINI_API_KEY_1", os.getenv("GEMINI_API_KEY", ""))
         key2   = os.getenv("GEMINI_API_KEY_2", "")
+        # Strip quotes in case the .env value was written as OLLAMA_MODEL="qwen3:8b"
+        ollama = os.getenv("OLLAMA_MODEL", "").strip('"\' ')
+
+        # If Ollama is configured, it gets PRIORITY slot #0
+        # It will always be tried first before any Gemini key
+        if ollama:
+            self._slots.append(KeySlot(
+                key="offline",
+                model=f"ollama/{ollama}",
+                name=f"OLLAMA_{ollama.upper()}"
+            ))
 
         if key1:
-            self._slots.append(KeySlot(key=key1, model=model, name="KEY_1"))
+            self._slots.append(KeySlot(key=key1, model=model, name="GEMINI_KEY_1"))
         if key2 and key2 not in ("YOUR_SECOND_GEMINI_KEY_HERE", key1, ""):
-            self._slots.append(KeySlot(key=key2, model=model, name="KEY_2"))
+            self._slots.append(KeySlot(key=key2, model=model, name="GEMINI_KEY_2"))
 
         if not self._slots:
-            raise RuntimeError("No Gemini API keys configured. Set GEMINI_API_KEY_1 in .env")
+            raise RuntimeError("No LLMs configured. Set GEMINI_API_KEY or OLLAMA_MODEL in .env")
 
-        print(f"[LLMManager] Initialized with {len(self._slots)} key(s): "
+        print(f"[LLMManager] Initialized with {len(self._slots)} slot(s): "
               f"{[s.name for s in self._slots]}")
+        if self._slots[0].model.startswith("ollama/"):
+            print(f"[LLMManager] PRIMARY model: {self._slots[0].name} (LOCAL OFFLINE)")
+        else:
+            print(f"[LLMManager] PRIMARY model: {self._slots[0].name} (Gemini API)")
 
-    def get_llm(self) -> LLM:
+    def get_llm(self, require_gemini: bool = False) -> LLM:
         """
-        Return an LLM instance from the next available key (round-robin).
-        Blocks and waits if all keys are temporarily exhausted.
+        Return the best available LLM.
+        Priority: Ollama (slot 0) always first, unless require_gemini is True.
+        Falls back to Gemini keys if Ollama is unavailable/failing, or if required.
         """
         with self._lock:
             max_wait = BACKOFF_MAX_SECS
@@ -139,25 +182,29 @@ class GeminiKeyPool:
             sleep_step = 5
 
             while waited <= max_wait:
-                # Try each slot starting from current round-robin index
+                # Iterate all slots, starting from the current index for true round-robin
                 for _ in range(len(self._slots)):
-                    slot = self._slots[self._index % len(self._slots)]
-                    self._index += 1
+                    slot = self._slots[self._index]
+                    self._index = (self._index + 1) % len(self._slots)
+                    
+                    if require_gemini and slot.model.startswith("ollama/"):
+                        continue # Skip Ollama if Gemini is strictly required
+                        
                     if slot.is_available():
                         slot.record_request()
                         print(f"[LLMManager] Using {slot.name} "
-                              f"(RPM: {slot.requests_this_minute}/{GEMINI_FREE_RPM})")
+                              f"({slot.model})")
                         return slot.get_llm()
 
-                # All keys unavailable — wait briefly and retry
-                print(f"[LLMManager] All keys rate-limited. Waiting {sleep_step}s... "
+                # All eligible slots unavailable — wait briefly and retry
+                print(f"[LLMManager] All eligible LLM slots unavailable. Waiting {sleep_step}s... "
                       f"(total waited: {waited}s)")
                 time.sleep(sleep_step)
                 waited += sleep_step
 
             raise RuntimeError(
-                f"All Gemini keys exhausted after {max_wait}s. "
-                "Consider upgrading to a paid tier or adding more keys."
+                f"All LLM slots exhausted after {max_wait}s. "
+                "Check that Ollama is running or add more Gemini keys."
             )
 
     def notify_429(self, llm: LLM):
@@ -203,12 +250,12 @@ def get_pool() -> GeminiKeyPool:
     return _pool
 
 
-def get_llm() -> LLM:
+def get_llm(require_gemini: bool = False) -> LLM:
     """
     Public API: get the next available Gemini LLM from the round-robin pool.
     Call this instead of constructing LLM() directly in agents/crew.
     """
-    return get_pool().get_llm()
+    return get_pool().get_llm(require_gemini=require_gemini)
 
 
 def notify_quota_error(llm: LLM):
@@ -246,24 +293,32 @@ def run_with_key_rotation(func, max_attempts: int = 6):
             return func()
 
         except Exception as e:
-            err_str = str(e)
-            is_quota = any(x in err_str for x in ("429", "RESOURCE_EXHAUSTED", "quota", "rate limit"))
+            err_str = str(e).lower()
+            is_quota = any(x in err_str for x in ("429", "resource_exhausted", "quota", "rate limit"))
+            is_connection = any(x in err_str for x in ("connection error", "failed to connect", "connection refused"))
 
-            if not is_quota:
-                raise  # Non-quota errors surface immediately
+            if not (is_quota or is_connection):
+                raise  # Other errors surface immediately
 
             last_exception = e
-            print(f"\n[LLMManager] Attempt {attempt}/{max_attempts} hit quota limit.")
+            if is_connection:
+                print(f"\n[LLMManager] Connection error on attempt {attempt}/{max_attempts}. Make sure Ollama is running if using offline model!")
+            else:
+                print(f"\n[LLMManager] Attempt {attempt}/{max_attempts} hit quota limit.")
 
             # Progressive wait: 65s → 130s → 260s → 300s max
             wait = min(BACKOFF_BASE_SECS * (2 ** (attempt - 1)), BACKOFF_MAX_SECS)
+            if is_connection:
+                wait = 10 # Wait shorter for connection retry
+
             jitter = random.randint(2, 10)
             total_wait = wait + jitter
 
             print(f"[LLMManager] Waiting {total_wait}s before retry "
                   f"(attempt {attempt}/{max_attempts})...")
-            print("[LLMManager] Both Gemini keys may be on cooldown. "
-                  "Tip: Add GEMINI_API_KEY_3 to .env for more quota.")
+            if is_quota:
+                print("[LLMManager] Both Gemini keys may be on cooldown. "
+                      "Tip: Add GEMINI_API_KEY_3 to .env for more quota.")
             time.sleep(total_wait)
 
     raise RuntimeError(

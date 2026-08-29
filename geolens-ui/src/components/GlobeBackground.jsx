@@ -114,51 +114,56 @@ export default function GlobeBackground() {
       controls.minDistance = 120;
       controls.maxDistance = 600;
 
-      // Fetch Country Polygons
+      // Fetch Country Polygons with error catching
       fetch('https://raw.githubusercontent.com/vasturiano/globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson')
         .then(res => res.json())
         .then(countries => {
+          if (!countries?.features) return;
           globe.polygonsData(countries.features)
             .polygonAltitude(0.01)
             .polygonCapColor(() => 'rgba(20, 20, 20, 0.2)')
             .polygonSideColor(() => 'rgba(0, 100, 255, 0.15)')
             .polygonStrokeColor(() => '#111')
             .onPolygonClick((polygon) => {
-              const countryName = polygon.properties.ADMIN;
-              setSelectedCountry(countryName);
+              const countryName = polygon?.properties?.ADMIN;
+              if (countryName) setSelectedCountry(countryName);
             })
             .onPolygonHover(hoverD => {
               globe.polygonAltitude(d => d === hoverD ? 0.06 : 0.01)
                    .polygonCapColor(d => d === hoverD ? 'rgba(47, 129, 247, 0.4)' : 'rgba(20, 20, 20, 0.2)');
             });
-        });
+        }).catch(err => console.warn('Country polygons failed to load:', err));
 
-      // Fetch Live EONET Events
+      // Fetch Live EONET Events with error catching
       fetch('https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=1000')
         .then(res => res.json())
         .then(data => {
+           if (!data?.events) return;
            const events = data.events.map(ev => {
-             if (!ev.geometry || !ev.geometry.length) return null;
-             const coords = ev.geometry[0].coordinates; 
-             // Geometry can be a Polygon (array of arrays) or Point (array of 2)
-             const lng = Array.isArray(coords[0]) ? coords[0][0] : coords[0];
-             const lat = Array.isArray(coords[0]) ? coords[0][1] : coords[1];
-             if (typeof lng !== 'number' || typeof lat !== 'number') return null;
+             try {
+               if (!ev?.geometry?.length) return null;
+               const coords = ev.geometry[0].coordinates;
+               if (!coords) return null;
+               const lng = Array.isArray(coords[0]) ? coords[0][0] : coords[0];
+               const lat = Array.isArray(coords[0]) ? coords[0][1] : coords[1];
+               if (typeof lng !== 'number' || typeof lat !== 'number') return null;
 
-             const category = ev.categories[0]?.id || 'unknown';
-             let color = '#FFCC00'; // Default Warning Yellow
-             if (category === 'wildfires') color = '#FF3300';
-             else if (category === 'volcanoes') color = '#FF9900';
-             else if (category === 'severeStorms') color = '#00CCFF';
-             else if (category === 'seaLakeIce') color = '#FFFFFF';
+               const category = ev.categories?.[0]?.id || 'unknown';
+               let color = '#FFCC00';
+               if (category === 'wildfires') color = '#FF3300';
+               if (category === 'severeStorms') color = '#38D9FF';
+               if (category === 'floods') color = '#2F81F7';
+               if (category === 'volcanoes') color = '#FF9900';
+               if (category === 'seaLakeIce') color = '#FFFFFF';
 
-             return { lat, lng, title: ev.title, category, color };
+               return { id: ev.id, title: ev.title, lat, lng, color, category };
+             } catch { return null; }
            }).filter(Boolean);
 
            eventsData.current = events;
            
            globe
-             .htmlElementsData(events)
+             .htmlElementsData(showEvents ? events : [])
              .htmlElement(d => {
                 const el = document.createElement('div');
                 el.innerHTML = `

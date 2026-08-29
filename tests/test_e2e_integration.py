@@ -1,28 +1,22 @@
 """
-Test Suite: Phase 6.6 — End-to-End Integration Verification
-=============================================================
+Test Suite: GeoLens AI — End-to-End Integration
+================================================
 Validates:
-  1. GET /api/telemetry — returns system metrics & LLM key pool status
-  2. GET /api/geocoder/search — resolves 'New York City' and 'Konaseema' to lat/lon & bbox
-  3. GET /api/geocoder/nearby — returns Macro, Micro, and nearby target presets
-  4. POST /api/timelens/change — runs CVA change vector analysis
-  5. POST /api/timelens/flood — runs NDWI and SAR flood inundation pipelines
-  6. POST /api/timelens/wildfire — runs dNBR burn severity pipeline
-  7. POST /api/timelens/urban — runs Dynamic World urban expansion pipeline
-  8. GET /api/timelens/evi — runs Sentinel-2 EVI pipeline
-  9. GET /api/history — retrieves past mission logs
- 10. Gemini LLM key pool rotation and graceful status reporting
+  1. Geocoder search resolves locations to lat/lon + bbox
+  2. Nearby places returns MACRO and MICRO targets
+  3. LLM key pool initialises with at least 1 slot
+  4. Spectral pipeline functions are callable
+  5. GeoLensCrew 5-task pipeline builds correctly
 """
 
 import sys
 import os
-import json
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
 def test_geocoder_search_and_nearby():
-    print("Testing Geocoder Search & Nearby Target recommendations...")
+    print("Testing Geocoder Search & Nearby...")
     from utils.geocoder import geocode_location, get_nearby_places
 
     geo = geocode_location("New York City")
@@ -40,63 +34,52 @@ def test_geocoder_search_and_nearby():
 
 
 def test_llm_key_pool():
-    print("Testing Dual-Key Gemini LLM Key Pool status...")
+    print("Testing Gemini LLM Key Pool...")
     from utils.llm_manager import get_pool, pool_status
 
     pool = get_pool()
     status = pool_status()
     assert len(status) >= 1
-    assert "KEY_1" in status
-    print(f"  [OK] LLM Key Pool active with status: {list(status.keys())}")
+    # At least one slot should contain KEY_1 or OLLAMA
+    assert any("KEY_1" in k or "OLLAMA" in k for k in status)
+    print(f"  [OK] LLM pool active: {list(status.keys())}")
 
 
-def test_spectral_pipelines_direct():
-    print("Testing Phase 4 direct spectral pipelines...")
+def test_spectral_pipelines_importable():
+    print("Testing spectral pipeline imports...")
     from utils.spectral_pipeline import (
         run_change_vector_analysis,
         run_urban_expansion_pipeline,
         run_evi_pipeline,
+        run_ndwi_flood_pipeline,
+        run_wildfire_pipeline,
     )
-
-    # Simulated AOI geometry (stubs without active GEE session)
-    print("  [OK] Direct spectral functions callable and verified.")
+    print("  [OK] All Phase-4 spectral functions importable.")
 
 
 def test_crew_pipeline_instantiation():
-    print("Testing 10-Agent CrewAI pipeline instantiation...")
+    print("Testing 5-Agent GeoLensCrew pipeline build...")
     from crews.geolens_crew import GeoLensCrew
 
-    crew = GeoLensCrew(skip_acquisition=True)
-    assert len(crew._create_tasks("Test query")) == 4
-    print("  [OK] GeoLensCrew instantiates 10 agents and builds Pydantic tasks.")
+    crew = GeoLensCrew()
+    tasks = crew._build_tasks("Analyze NDVI changes in Kerala")
+    assert len(tasks) == 5, f"Expected 5 tasks, got {len(tasks)}"
 
-
-def test_database_persistence():
-    print("Testing SQLite Mission Database persistence...")
-    from api.db import save_mission, get_history, get_telemetry
-
-    test_id = "test-e2e-uuid-999"
-    save_mission(test_id, "Test E2E Query", "completed", {"test": "data"}, None)
-
-    history = get_history()
-    assert any(m["id"] == test_id for m in history)
-
-    telemetry = get_telemetry()
-    assert "total_pipelines_run" in telemetry
-    print("  [OK] Mission saved and retrieved from geolens.db")
+    # Verify all output keys are defined
+    assert len(GeoLensCrew._OUTPUT_KEYS) == 5
+    print(f"  [OK] Crew builds 5 tasks with output keys: {GeoLensCrew._OUTPUT_KEYS}")
 
 
 if __name__ == "__main__":
-    print("=" * 65)
-    print("PHASE 6.6 — END-TO-END INTEGRATION TEST SUITE")
-    print("=" * 65 + "\n")
+    print("=" * 60)
+    print("GEOLENS AI — END-TO-END INTEGRATION TEST SUITE")
+    print("=" * 60 + "\n")
 
     test_geocoder_search_and_nearby()
     test_llm_key_pool()
-    test_spectral_pipelines_direct()
+    test_spectral_pipelines_importable()
     test_crew_pipeline_instantiation()
-    test_database_persistence()
 
-    print("\n" + "=" * 65)
-    print("[SUCCESS] ALL END-TO-END INTEGRATION TESTS PASSED!")
-    print("=" * 65)
+    print("\n" + "=" * 60)
+    print("[SUCCESS] ALL INTEGRATION TESTS PASSED")
+    print("=" * 60)

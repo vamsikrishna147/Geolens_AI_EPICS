@@ -28,7 +28,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./data:/app/data
-      - ./geolens.db:/app/geolens.db
+      - ./workspace:/app/workspace
     depends_on:
       redis:
         condition: service_healthy

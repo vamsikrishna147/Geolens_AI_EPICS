@@ -1,41 +1,8 @@
 """
-GeoLens AI - Crew Orchestration (Phase 3 Complete — 10-Agent Pipeline)
-========================================================================
-Full sequential pipeline:
-
-  User Query
-      │
-      ▼
-   1. Planner Agent
-      │
-      ▼
-   2. Dataset Discovery Agent
-      │
-      ├───────────────────────┐
-      ▼                       ▼
-   3. Weather & Climate   4. Research & Policy RAG
-      │                       │
-      └───────────┬───────────┘
-                  ▼
-   5. Data Acquisition Agent
-                  │
-                  ▼
-   6. GIS Processing Agent
-                  │
-                  ▼
-   7. Temporal Analysis Agent (TimeLens Engine)
-                  │
-                  ▼
-   8. Satellite Analysis Agent
-                  │
-                  ▼
-   9. Recommendation & Decision Support Agent
-                  │
-                  ▼
-  10. Official Report Agent (Structured JSON Government Briefing)
-
-Phase 6.4: Dual-key Gemini round-robin pool — instant key swap on 429,
-           progressive backoff only when all keys exhausted.
+GeoLens AI - Crew Orchestration (5-Agent Pipeline)
+===================================================
+Pipeline:
+  Planner → Data Acquisition → GIS Processing → Earth Observation → Report Intelligence
 """
 
 import os
@@ -44,33 +11,26 @@ from typing import Optional
 from crewai import Agent, Crew, LLM, Process, Task
 from pydantic import BaseModel, Field
 
-# Phase 6.4 — dual-key pool manager (replaces manual _run_with_retry)
-from utils.llm_manager import get_llm, run_with_key_rotation, pool_status
+from utils.llm_manager import get_llm, run_with_key_rotation
 
 from agents.planner_agent import create_planner_agent
-from agents.dataset_discovery_agent import create_dataset_discovery_agent
-from agents.data_acquisition_agent import create_data_acquisition_agent
-from agents.satellite_agent import create_satellite_agent
+from agents.data_sourcing_agent import create_data_sourcing_agent
 from agents.gis_agent import create_gis_agent
-from agents.report_agent import create_report_agent
-from agents.temporal_analysis_agent import create_temporal_analysis_agent
-from agents.research_policy_agent import create_research_policy_agent
-from agents.weather_climate_agent import create_weather_climate_agent
-from agents.recommendation_agent import create_recommendation_agent
-
-
+from agents.earth_observation_agent import create_earth_observation_agent
+from agents.final_reporting_agent import create_final_reporting_agent
 
 
 # ── Structured Output Models ──────────────────────────────────────────
 
 class AnalysisPlan(BaseModel):
-    query_summary: str = Field(description="Concise summary of the user's request.")
-    location: str = Field(description="Resolved location or Area of Interest.")
-    time_period: str = Field(description="Time period for the analysis.")
-    analysis_types: list[str] = Field(description="List of analysis types needed.")
-    data_requirements: list[str] = Field(description="List of data categories needed.")
-    expected_outputs: list[str] = Field(description="List of expected outputs.")
-    priority_notes: str = Field(default="", description="Special considerations.")
+    query_summary: str = Field(description="Summary of the geospatial request.")
+    location: str = Field(description="Area of Interest (AOI).")
+    time_period: str = Field(description="Relevant time period for analysis.")
+    analysis_types: list[str] = Field(description="Analysis types needed (e.g. NDVI, flood).")
+    data_requirements: list[str] = Field(description="Satellite/data categories required.")
+    expected_outputs: list[str] = Field(description="Expected deliverables from the pipeline.")
+    priority_notes: str = Field(default="", description="Special urgency or priority notes.")
+
 
 class DatasetMatch(BaseModel):
     name: str
@@ -80,84 +40,54 @@ class DatasetMatch(BaseModel):
     spatial_resolution: str = ""
     temporal_range: str = ""
 
-class DatasetRecommendation(BaseModel):
-    recommended_datasets: list[DatasetMatch]
-    workflow_suggestion: str
-    notes: str = ""
 
-class WeatherClimateAnalysis(BaseModel):
-    current_weather_summary: str = Field(description="Summary of current or recent weather conditions.")
-    precipitation_anomaly_mm: float = Field(default=0.0, description="Precipitation anomaly in mm compared to historical mean.")
-    temperature_trend: str = Field(description="Temperature trend and variances.")
-    active_fire_hotspots_count: int = Field(default=0, description="Count of detected active thermal fire hotspots.")
-    climate_risk_level: str = Field(description="Risk Level: LOW, MEDIUM, HIGH, or CRITICAL.")
-    meteorological_forecast: str = Field(description="Short-term weather forecast summary.")
+class DataAcquisitionResult(BaseModel):
+    recommended_datasets: list[DatasetMatch] = Field(description="Best datasets for this query.")
+    acquired_data: list[dict] = Field(description="Successfully retrieved datasets with paths.")
+    failed_acquisitions: list[str] = Field(default=[], description="Datasets that failed retrieval.")
+    storage_summary: str = Field(description="Summary of where data is stored.")
+    next_steps: str = Field(description="Recommended next processing steps.")
 
-class ResearchPolicyResult(BaseModel):
-    academic_citations: list[dict] = Field(default=[], description="Relevant scientific papers retrieved with title and year.")
-    policy_frameworks: list[str] = Field(default=[], description="Applicable government policies or NDMA guidelines.")
-    scientific_consensus: str = Field(description="Summary of scientific literature consensus regarding this spatial event.")
-    regulatory_compliance_notes: str = Field(description="Governance benchmarks and regulatory compliance considerations.")
-
-class AcquisitionResult(BaseModel):
-    acquired_data: list[dict] = Field(description="List of successfully retrieved datasets with details.")
-    failed_acquisitions: list[str] = Field(default=[], description="List of data sources that could not be retrieved and why.")
-    storage_summary: str = Field(description="Summary of where data was stored.")
-    next_steps: str = Field(description="Recommended next steps for GIS processing.")
-    total_datasets_acquired: int = Field(description="Total number of datasets successfully retrieved.")
 
 class GISProcessingResult(BaseModel):
-    operations_performed: list[str] = Field(description="List of GIS operations performed.")
-    output_files: list[str] = Field(description="List of output file paths generated by GIS processing.")
-    maps_generated: list[str] = Field(default=[], description="List of interactive HTML map file paths.")
-    gis_summary: str = Field(description="Summary of all GIS processing done.")
+    operations_performed: list[str] = Field(description="GIS operations executed.")
+    output_files: list[str] = Field(description="Output file paths generated.")
+    maps_generated: list[str] = Field(default=[], description="Interactive HTML map paths.")
+    gis_summary: str = Field(description="Summary of GIS processing results.")
 
-class TemporalAnalysisResult(BaseModel):
-    baseline_year: str = Field(description="Historical baseline observation year (e.g., 2018).")
-    comparison_year: str = Field(description="Current/recent comparison year (e.g., 2025).")
-    urban_expansion_km2: float = Field(default=0.0, description="Quantified urban expansion in sq km.")
-    vegetation_change_pct: float = Field(default=0.0, description="Percentage change in dense vegetation/NDVI.")
-    water_change_pct: float = Field(default=0.0, description="Percentage change in surface water extent/NDWI.")
-    change_summary: str = Field(description="TimeLens narrative summary of physical landscape transformations.")
-    detected_anomalies: list[str] = Field(default=[], description="List of specific anomalies detected across time layers.")
 
-class SatelliteAnalysis(BaseModel):
-    event_summary: str = Field(description="High-level summary of the physical event.")
-    gee_interpretation: str = Field(description="Detailed interpretation of GEE data.")
-    web_intelligence: str = Field(description="Synthesis of news, reports, and web screenshots.")
-    damage_assessment: str = Field(description="Estimated damage or impact.")
-    confidence_score: str = Field(description="High, Medium, or Low confidence.")
+class EarthObservationResult(BaseModel):
+    baseline_year: str = Field(description="Baseline year for comparison (e.g. 2018).")
+    comparison_year: str = Field(description="Comparison year (e.g. 2025).")
+    change_summary: str = Field(description="Narrative description of landscape change.")
+    detected_anomalies: list[str] = Field(default=[], description="Detected anomalies in the data.")
+    event_summary: str = Field(description="Physical event summary (flood, fire, deforestation, etc.).")
+    gee_interpretation: str = Field(description="Google Earth Engine data interpretation.")
+    confidence_score: str = Field(description="Confidence level: High, Medium, or Low.")
 
-class DecisionRecommendations(BaseModel):
-    executive_action_items: list[str] = Field(description="High-priority action items for decision makers.")
-    short_term_emergency_measures: list[str] = Field(description="Immediate interventions (0-7 days).")
-    long_term_resilience_policies: list[str] = Field(description="Strategic zoning and policy adjustments (1-6 months).")
-    resource_allocation_priorities: list[str] = Field(description="Prioritized sectors and zones for emergency resource deployment.")
-    risk_mitigation_score: float = Field(description="Overall risk reduction index from 0 to 100.")
-
-class TimeLensData(BaseModel):
-    year_before: str
-    year_after: str
-    brief: str
 
 class ChartDataPoint(BaseModel):
     name: str
     value: float
 
+
 class CompositionDataPoint(BaseModel):
     name: str
     value: float
-    color: str = Field(description="Hex color code for the pie chart slice")
+    color: str = Field(description="Hex color code for chart rendering.")
+
 
 class TableDataRow(BaseModel):
     region: str
     change_pct: str
     risk: str
 
+
 class AnalyticsData(BaseModel):
-    total_area_affected_km2: str = Field(description="Total area affected in km2 as a string.")
-    severity: str = Field(description="Severity: HIGH, MEDIUM, or LOW.")
-    primary_impact: str = Field(description="Short description of the primary impact.")
+    total_area_affected_km2: str = Field(description="Total affected area in km².")
+    severity: str = Field(description="Severity level: HIGH, MEDIUM, or LOW.")
+    primary_impact: str = Field(description="Primary environmental or human impact.")
+
 
 class OfficialReport(BaseModel):
     report_id: str
@@ -166,7 +96,7 @@ class OfficialReport(BaseModel):
     executive_summary: str
     confidence_score: float
     data_sources: list[dict]
-    time_lens: TimeLensData
+    time_lens: dict
     analytics: AnalyticsData
     chart_data: list[ChartDataPoint]
     composition_data: list[CompositionDataPoint]
@@ -176,146 +106,117 @@ class OfficialReport(BaseModel):
 # ── Crew Class ────────────────────────────────────────────────────────
 
 class GeoLensCrew:
-    def __init__(self, llm: Optional[LLM] = None, verbose: bool = True, skip_acquisition: bool = False):
+    """Orchestrates the 5-agent GeoLens AI pipeline."""
+
+    # Maps task index → output dict key
+    _OUTPUT_KEYS = [
+        "analysis_plan",
+        "data_acquisition",
+        "gis_processing",
+        "earth_observation",
+        "official_report",
+    ]
+
+    def __init__(self, llm: Optional[LLM] = None, verbose: bool = True):
         self.verbose = verbose
-        self.skip_acquisition = skip_acquisition
 
-        # Phase 6.4: use round-robin pool; accept override for testing
-        llm_1 = llm if llm is not None else get_llm()
-        llm_2 = llm if llm is not None else get_llm()
-        self.llm = llm_1
+        # Intelligent LLM Routing
+        # Heavy data-processing agents strictly use Gemini for speed and large context windows.
+        # Reasoning agents use the general round-robin pool (which includes local Ollama).
+        llm_pool   = llm if llm is not None else get_llm(require_gemini=False)
+        llm_gemini = llm if llm is not None else get_llm(require_gemini=True)
 
-        # Create all 10 agents — alternate keys between agents for spread
-        self.planner          = create_planner_agent(llm=llm_1)
-        self.dataset_agent    = create_dataset_discovery_agent(llm=llm_2)
-        self.weather_agent    = create_weather_climate_agent(llm=llm_1)
-        self.research_agent   = create_research_policy_agent(llm=llm_2)
-        self.recommendation_agent = create_recommendation_agent(llm=llm_1)
-        self.report_agent     = create_report_agent(llm=llm_2)
+        self.planner          = create_planner_agent(llm=llm_pool)
+        self.data_agent       = create_data_sourcing_agent(llm=llm_pool)
+        self.gis_agent        = create_gis_agent(llm=llm_gemini)
+        self.eo_agent         = create_earth_observation_agent(llm=llm_gemini)
+        self.reporting_agent  = create_final_reporting_agent(llm=llm_pool)
 
-        if not skip_acquisition:
-            self.acquisition_agent = create_data_acquisition_agent(llm=llm_1)
-            self.gis_agent         = create_gis_agent(llm=llm_2)
-            self.temporal_agent    = create_temporal_analysis_agent(llm=llm_1)
-            self.satellite_agent   = create_satellite_agent(llm=llm_2)
+    def _build_tasks(self, user_query: str) -> list[Task]:
+        """Build the sequential 5-task pipeline."""
 
-    def _create_tasks(self, user_query: str) -> list[Task]:
-        # Task 1: Planning
-        planning_task = Task(
-            description=(f"Analyze this geospatial query and create a structured analysis plan.\nUSER QUERY: \"{user_query}\""),
-            expected_output="Structured analysis plan.",
+        # Task 1 — Planner
+        task_plan = Task(
+            description=(
+                f"Analyze this geospatial query and produce a structured analysis plan.\n"
+                f"USER QUERY: \"{user_query}\""
+            ),
+            expected_output="Structured analysis plan with location, time period, and required datasets.",
             agent=self.planner,
             output_pydantic=AnalysisPlan,
         )
 
-        # Task 2: Dataset Discovery
-        discovery_task = Task(
-            description="Search the GeoLens dataset registry to find the best open datasets for this analysis.",
-            expected_output="Dataset recommendation.",
-            agent=self.dataset_agent,
-            context=[planning_task],
-            output_pydantic=DatasetRecommendation,
+        # Task 2 — Data Acquisition
+        task_data = Task(
+            description=(
+                "Search the GeoLens dataset registry for the best satellite and open datasets "
+                "matching the analysis plan, then fetch them using acquisition tools. "
+                "Prioritise Sentinel-2, Landsat 8/9, and MODIS where applicable."
+            ),
+            expected_output="Dataset recommendations with acquired file paths, metadata, and next-step guidance.",
+            agent=self.data_agent,
+            context=[task_plan],
+            output_pydantic=DataAcquisitionResult,
         )
 
-        # Task 3: Weather & Climate Analysis
-        weather_task = Task(
-            description="Retrieve meteorological forecasts, climate anomalies, and fire hotspot data for the AOI.",
-            expected_output="Weather, climate anomaly, and fire hotspot report.",
-            agent=self.weather_agent,
-            context=[planning_task],
-            output_pydantic=WeatherClimateAnalysis,
+        # Task 3 — GIS Processing
+        task_gis = Task(
+            description=(
+                "Process the acquired satellite and vector datasets using standard GIS operations: "
+                "clip to AOI, buffer, reproject, compute spectral indices. "
+                "Generate interactive Folium/Leaflet HTML maps for the web dashboard."
+            ),
+            expected_output="GIS processing report with operation log, output files, and HTML map paths.",
+            agent=self.gis_agent,
+            context=[task_plan, task_data],
+            output_pydantic=GISProcessingResult,
         )
 
-        # Task 4: Research & Policy RAG
-        research_task = Task(
-            description="Query scientific paper databases and government disaster frameworks to synthesize scientific literature and policy guidelines.",
-            expected_output="Academic citations and policy compliance summary.",
-            agent=self.research_agent,
-            context=[planning_task],
-            output_pydantic=ResearchPolicyResult,
+        # Task 4 — Earth Observation & TimeLens
+        task_eo = Task(
+            description=(
+                "Perform multi-temporal satellite change detection (TimeLens). "
+                "Interpret GEE spectral indices (NDVI, NDWI, NBR) and synthesise the physical event "
+                "(flood, wildfire, deforestation, urban sprawl, etc.). "
+                "Provide a confidence score for your findings."
+            ),
+            expected_output="Earth observation report covering temporal change, anomaly detection, and event synthesis.",
+            agent=self.eo_agent,
+            context=[task_plan, task_data, task_gis],
+            output_pydantic=EarthObservationResult,
         )
 
-        tasks = [planning_task, discovery_task, weather_task, research_task]
+        # Task 5 — Report Intelligence
+        task_report = Task(
+            description=(
+                "Synthesise all upstream findings into a government-grade intelligence brief. "
+                "Include analytics (affected area, severity), chart data, composition breakdown, "
+                "regional risk table, and an executive summary. "
+                "Output strictly structured JSON conforming to the OfficialReport schema."
+            ),
+            expected_output=(
+                "Strictly structured JSON OfficialReport with analytics, chart_data, "
+                "composition_data, table_data, and executive_summary."
+            ),
+            agent=self.reporting_agent,
+            context=[task_plan, task_eo, task_gis],
+            output_pydantic=OfficialReport,
+        )
 
-        if not self.skip_acquisition:
-            # Task 5: Data Acquisition
-            acquisition_task = Task(
-                description="NOW ACTUALLY FETCH the required spatial data by calling appropriate acquisition tools based on the plan.",
-                expected_output="Acquisition report with file paths and metadata.",
-                agent=self.acquisition_agent,
-                context=[planning_task, discovery_task, weather_task],
-                output_pydantic=AcquisitionResult,
-            )
-            tasks.append(acquisition_task)
-
-            # Task 6: GIS Processing
-            gis_task = Task(
-                description="Process the downloaded vector and raster files using GIS operations (clip, buffer) and generate interactive HTML maps.",
-                expected_output="GIS processing report with map paths.",
-                agent=self.gis_agent,
-                context=[acquisition_task],
-                output_pydantic=GISProcessingResult,
-            )
-            tasks.append(gis_task)
-
-            # Task 7: TimeLens Historical Change Detection
-            temporal_task = Task(
-                description="Perform multi-temporal satellite change analysis using the TimeLens engine. Compare baseline T1 imagery with current T2 imagery to quantify urban growth, forest loss, and water body changes.",
-                expected_output="TimeLens multi-temporal change detection results.",
-                agent=self.temporal_agent,
-                context=[acquisition_task, gis_task],
-                output_pydantic=TemporalAnalysisResult,
-            )
-            tasks.append(temporal_task)
-
-            # Task 8: Satellite Analysis
-            satellite_task = Task(
-                description="Synthesize GEE satellite telemetry, remote sensing metrics, and web intelligence to interpret the spatial event.",
-                expected_output="Comprehensive Earth Observation interpretation report.",
-                agent=self.satellite_agent,
-                context=[acquisition_task, gis_task, temporal_task],
-                output_pydantic=SatelliteAnalysis,
-            )
-            tasks.append(satellite_task)
-
-            # Task 9: Recommendation & Decision Support
-            recommendation_task = Task(
-                description="Synthesize spatial findings, TimeLens change vectors, climate risks, and policy guidelines into actionable emergency response steps and long-term land-use policies.",
-                expected_output="Prioritized executive decision recommendations and mitigation measures.",
-                agent=self.recommendation_agent,
-                context=[satellite_task, temporal_task, research_task, weather_task],
-                output_pydantic=DecisionRecommendations,
-            )
-            tasks.append(recommendation_task)
-
-            # Task 10: Official Report Generation
-            report_task = Task(
-                description="Transform all prior agent findings into a final, strictly structured JSON Official Government Brief adhering to the OfficialReport schema.",
-                expected_output="Highly structured JSON adhering to the OfficialReport schema containing analytics, charts, recommendations, and TimeLens data.",
-                agent=self.report_agent,
-                context=[satellite_task, temporal_task, recommendation_task, research_task],
-                output_pydantic=OfficialReport,
-            )
-            tasks.append(report_task)
-
-        return tasks
+        return [task_plan, task_data, task_gis, task_eo, task_report]
 
     def run(self, user_query: str) -> dict:
-        tasks = self._create_tasks(user_query)
-
-        agents = [self.planner, self.dataset_agent, self.weather_agent, self.research_agent]
-        if not self.skip_acquisition:
-            agents.extend([
-                self.acquisition_agent,
-                self.gis_agent,
-                self.temporal_agent,
-                self.satellite_agent,
-                self.recommendation_agent,
-                self.report_agent,
-            ])
+        """Run the 5-agent pipeline and return structured outputs."""
+        tasks = self._build_tasks(user_query)
 
         crew = Crew(
-            agents=agents,
+            agents=[
+                self.planner,
+                self.data_agent,
+                self.gis_agent,
+                self.eo_agent,
+                self.reporting_agent,
+            ],
             tasks=tasks,
             process=Process.sequential,
             verbose=self.verbose,
@@ -323,34 +224,12 @@ class GeoLensCrew:
 
         result = run_with_key_rotation(lambda: crew.kickoff(), max_attempts=6)
 
-        output = {
-            "raw_output": result.raw if hasattr(result, "raw") else str(result),
-            "analysis_plan": None,
-            "dataset_recommendation": None,
-            "weather_climate": None,
-            "research_policy": None,
-            "acquisition_result": None,
-            "gis_processing": None,
-            "temporal_analysis": None,
-            "satellite_analysis": None,
-            "decision_recommendations": None,
-            "official_report": None,
-        }
+        # Build output dict — one key per task
+        output = {key: None for key in self._OUTPUT_KEYS}
+        output["raw_output"] = result.raw if hasattr(result, "raw") else str(result)
 
-        # Safely extract Pydantic outputs from tasks
-        for i, task in enumerate(tasks):
+        for idx, task in enumerate(tasks):
             if task.output and hasattr(task.output, "pydantic") and task.output.pydantic:
-                val = task.output.pydantic.model_dump()
-                if i == 0: output["analysis_plan"] = val
-                elif i == 1: output["dataset_recommendation"] = val
-                elif i == 2: output["weather_climate"] = val
-                elif i == 3: output["research_policy"] = val
-                elif self.skip_acquisition: continue
-                elif i == 4: output["acquisition_result"] = val
-                elif i == 5: output["gis_processing"] = val
-                elif i == 6: output["temporal_analysis"] = val
-                elif i == 7: output["satellite_analysis"] = val
-                elif i == 8: output["decision_recommendations"] = val
-                elif i == 9: output["official_report"] = val
+                output[self._OUTPUT_KEYS[idx]] = task.output.pydantic.model_dump()
 
         return output

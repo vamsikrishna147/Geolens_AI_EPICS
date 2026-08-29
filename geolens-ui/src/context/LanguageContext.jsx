@@ -182,7 +182,8 @@ export function LanguageProvider({ children }) {
   const [language, setLanguage] = useState('en');
 
   const t = (key) => {
-    return translations[language][key] || key;
+    if (!key) return '';
+    return (translations[language] && translations[language][key]) || key;
   };
 
   return (

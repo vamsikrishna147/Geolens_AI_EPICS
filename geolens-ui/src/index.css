@@ -38,21 +38,55 @@
   }
 }
 
-/* Animations */
+/* ── Animations ──────────────────────────────────────────────────── */
+
 @keyframes pulse-ring {
-  0% { box-shadow: 0 0 0 0 rgba(47, 129, 247, 0.4); }
-  70% { box-shadow: 0 0 0 10px rgba(47, 129, 247, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(47, 129, 247, 0); }
+  0%   { box-shadow: 0 0 0 0   rgba(47, 129, 247, 0.5); }
+  70%  { box-shadow: 0 0 0 8px rgba(47, 129, 247, 0); }
+  100% { box-shadow: 0 0 0 0   rgba(47, 129, 247, 0); }
 }
 
-.animate-pulse-ring {
-  animation: pulse-ring 2s infinite;
+@keyframes glow-pulse {
+  0%, 100% { opacity: 1;   filter: drop-shadow(0 0 4px rgba(47, 129, 247, 0.6)); }
+  50%       { opacity: 0.7; filter: drop-shadow(0 0 10px rgba(47, 129, 247, 1)); }
 }
 
-/* Scrollbars */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--color-mc-border); border-radius: 4px; }
+@keyframes scan-line {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  10%  { opacity: 0.4; }
+  90%  { opacity: 0.4; }
+  100% { transform: translateY(200%); opacity: 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-5px); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+@keyframes connector-fill {
+  from { height: 0; }
+  to   { height: 100%; }
+}
+
+.animate-pulse-ring   { animation: pulse-ring   2s   cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+.animate-glow-pulse   { animation: glow-pulse   2.5s ease-in-out infinite; }
+.animate-scan         { animation: scan-line     3s   ease-in-out infinite; }
+.animate-float        { animation: float         4s   ease-in-out infinite; }
+.animate-shimmer      {
+  background: linear-gradient(90deg, transparent, rgba(47,129,247,0.15), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+/* ── Scrollbars ───────────────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 5px; height: 5px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--color-mc-border); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-mc-muted); }
 
 /* ===== DARK MODE Skeuomorphic UI ===== */

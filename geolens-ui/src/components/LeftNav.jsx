@@ -1,30 +1,58 @@
-import React, { useState } from 'react';
-import { Globe, Layers, Database, FolderGit2, FileText, History } from 'lucide-react';
+import React from 'react';
+import { Globe, Map, FolderOpen, Clock } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
-const NavItem = ({ icon: Icon, label, active, onClick }) => (
-  <button 
-    onClick={onClick}
-    className={`group relative flex items-center p-3 rounded-lg transition-colors ${active ? 'skeuo-button text-mc-primary' : 'text-mc-muted hover:bg-mc-panel hover:text-mc-text'}`}
-  >
-    <Icon size={22} strokeWidth={1.5} />
-    <span className="absolute left-14 skeuo-panel border border-mc-border px-3 py-1.5 rounded text-sm font-body font-medium text-mc-text opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
-      {label}
-    </span>
-  </button>
-);
+const TABS = [
+  { id: 'Mission Control',  Icon: Globe,      label: 'Mission Control'  },
+  { id: 'Map & Analyzer',   Icon: Map,        label: 'Map & Analyzer'   },
+  { id: 'TimeLens',         Icon: Clock,      label: 'TimeLens'         },
+  { id: 'Workspace',        Icon: FolderOpen, label: 'Workspace'        },
+];
+
+function NavItem({ id, Icon, label, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      className={`group relative flex items-center p-3 rounded-xl transition-all duration-200 ${
+        active
+          ? 'bg-mc-primary/15 text-mc-primary shadow-[0_0_12px_rgba(47,129,247,0.2)]'
+          : 'text-mc-muted hover:bg-mc-panel hover:text-mc-text'
+      }`}
+    >
+      {/* Active indicator stripe */}
+      {active && (
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-mc-primary rounded-r-full" />
+      )}
+
+      <Icon size={21} strokeWidth={1.6} />
+
+      {/* Tooltip */}
+      <span className="absolute left-14 skeuo-panel border border-mc-border px-3 py-1.5 rounded-lg text-xs font-mono font-medium text-mc-text opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-[200] shadow-xl">
+        {label}
+      </span>
+    </button>
+  );
+}
 
 export default function LeftNav({ activeTab, onTabChange }) {
   const { t } = useLanguage();
 
   return (
-    <nav className="skeuo-panel p-2 flex flex-col gap-2 h-fit max-h-full overflow-y-auto overflow-x-hidden z-[100]">
-      <NavItem icon={Globe} label={t('Mission Control')} active={activeTab === 'Mission Control'} onClick={() => onTabChange('Mission Control')} />
-      <NavItem icon={Layers} label={t('Map Layers')} active={activeTab === 'Map Layers'} onClick={() => onTabChange('Map Layers')} />
-      <NavItem icon={Database} label={t('Data & Validation')} active={activeTab === 'Data & Validation'} onClick={() => onTabChange('Data & Validation')} />
-      <NavItem icon={FolderGit2} label={t('Workspace')} active={activeTab === 'Workspace'} onClick={() => onTabChange('Workspace')} />
-      <div className="w-full h-px bg-mc-border my-2" />
-      <NavItem icon={History} label={t('TimeLens Analysis')} active={activeTab === 'TimeLens Analysis'} onClick={() => onTabChange('TimeLens Analysis')} />
+    <nav
+      className="skeuo-panel p-2 flex flex-col gap-1.5 h-fit"
+      aria-label="Main navigation"
+    >
+      {TABS.map(({ id, Icon, label }) => (
+        <NavItem
+          key={id}
+          id={id}
+          Icon={Icon}
+          label={t(label)}
+          active={activeTab === id}
+          onClick={() => onTabChange(id)}
+        />
+      ))}
     </nav>
   );
 }

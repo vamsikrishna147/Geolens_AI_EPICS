@@ -9,15 +9,14 @@ Pipeline position:
   Planner → Dataset Discovery → Data Acquisition → GIS Processing → Satellite Analysis
 """
 
-import os
-from crewai import Agent, LLM
+from crewai import Agent
 
 from tools.vector_tool import VectorTool
 from tools.raster_tool import RasterTool
 from tools.map_tool import MapTool
 
 
-def create_gis_agent(llm: LLM = None) -> Agent:
+def create_gis_agent(llm=None) -> Agent:
     """
     Create and return the GIS Processing Agent.
 
@@ -28,11 +27,8 @@ def create_gis_agent(llm: LLM = None) -> Agent:
         A configured CrewAI Agent with Vector, Raster, and Map tools.
     """
     if llm is None:
-        llm = LLM(
-            model=os.getenv("GEMINI_MODEL", "gemini/gemini-2.0-flash"),
-            api_key=os.getenv("GEMINI_API_KEY"),
-            temperature=0.1,  # Deterministic — GIS operations must be precise
-        )
+        from utils.llm_manager import get_llm
+        llm = get_llm()
 
     tools = [
         VectorTool(),
@@ -43,39 +39,25 @@ def create_gis_agent(llm: LLM = None) -> Agent:
     agent = Agent(
         role="GIS Processing Technician",
         goal=(
-            "Process the geospatial data files retrieved by the Data Acquisition Agent. "
-            "Perform vector operations (buffer zones, spatial intersections, area calculations) "
-            "and raster operations (clip to boundaries, zonal statistics). Then generate "
-            "interactive HTML maps that visualize the final results. Report file paths "
-            "for all outputs so the Satellite Analysis Agent can interpret them."
+            "Process acquired geospatial data using vector/raster operations, "
+            "generate interactive maps, and report all output file paths."
         ),
         backstory=(
-            "You are an expert GIS technician with deep expertise in PostGIS, GeoPandas, "
-            "and Rasterio. You take raw downloaded geospatial data and transform it into "
-            "analysis-ready products.\n\n"
-            "Your capabilities:\n"
-            "- Buffer: Create buffer zones (e.g., 5km around a landslide point)\n"
-            "- Intersect: Find features within a zone (e.g., hospitals in a flood area)\n"
-            "- Clip: Crop satellite imagery to a district/state boundary\n"
-            "- Zonal Stats: Calculate mean NDVI or elevation within a polygon\n"
-            "- Area: Calculate the area of flood/landslide polygons in sq km\n"
-            "- Map: Generate interactive HTML maps with satellite basemaps\n\n"
-            "Your workflow:\n"
-            "1. Read the Data Acquisition Agent's output to find file paths\n"
-            "2. Identify which GIS operations would add analytical value\n"
-            "3. Execute the operations using VectorTool, RasterTool, and MapTool\n"
-            "4. Generate at least one interactive map for visualization\n"
-            "5. Report all output file paths\n\n"
-            "You are smart about choosing operations. If the query is about flooding, "
-            "you clip the SAR data to the district boundary and calculate the flood area. "
-            "If it's about landslides near infrastructure, you buffer the landslide points "
-            "and intersect with OSM features. You always generate a map."
+            "You are a GIS technician. Use VectorTool, RasterTool, and MapTool.\n"
+            "Supported operations:\n"
+            "- Buffer: create buffer zones around features\n"
+            "- Intersect: find features within a zone\n"
+            "- Clip: crop rasters to boundaries\n"
+            "- Zonal Stats: compute stats (mean NDVI, elevation) within polygons\n"
+            "- Area: calculate polygon areas in sq km\n"
+            "- Map: generate interactive HTML maps\n\n"
+            "Always generate at least one map. Report all output file paths."
         ),
         tools=tools,
         llm=llm,
         verbose=True,
         allow_delegation=False,
-        max_iter=20,
+        max_iter=12,
     )
 
     return agent
