@@ -1,0 +1,49 @@
+autonomous_gis/
+│
+├── api/                   # FastAPI Backend Server & Endpoints
+│   └── server.py          # WebSocket log streaming, REST endpoints for TimeLens, Chat, & Analysis
+│
+├── agents/                # CrewAI Autonomous Domain Agents
+│   ├── planner_agent.py          # AOI & Query Planning
+│   ├── data_sourcing_agent.py    # Dataset Discovery & Retrieval
+│   ├── gis_agent.py              # Geoprocessing & Spatial Analysis
+│   ├── earth_observation_agent.py# Remote Sensing & TimeLens Analyst
+│   └── final_reporting_agent.py  # Policy Brief & JSON/Markdown Generator
+│
+├── crews/                 # Multi-Agent Orchestration
+│   └── geolens_crew.py    # 5-Agent sequential pipeline & Pydantic output contracts
+│
+├── tools/                 # Agent Tools (Interfaces to External APIs & GIS Engines)
+│   ├── gee_tool.py          # Google Earth Engine interface
+│   ├── map_tool.py          # Interactive Folium map generator
+│   ├── raster_tool.py       # Rasterio elevation/spectral computations
+│   ├── vector_tool.py       # GeoPandas/Shapely spatial join & overlay
+│   ├── screenshot_tool.py   # Playwright headless browser fallback
+│   └── change_detection_tool.py # TimeLens spectral CVA algorithm
+│
+├── utils/                 # Core Utilities & Algorithms
+│   ├── llm_manager.py       # Dual-LLM key pool (Gemini + Ollama) & rate-limiting
+│   ├── geocoder.py          # Nominatim geocoding & nearby target discovery
+│   └── spectral_pipeline.py # Scientific formulas (NDVI, NDWI, EVI, dNBR, SAR flood)
+│
+├── storage/               # Database & File System Managers
+│   ├── storage_manager.py   # Central storage routing manager
+│   ├── postgis_client.py    # PostGIS client & schema initializer
+│   └── mongo_client.py      # MongoDB logger
+│
+├── geolens-ui/            # React Single-Page Frontend Application
+│   └── src/
+│       ├── components/    # TimeLensCompare, ScientificReport, AssistantChat, BottomCommand
+│       ├── views/         # MapLayersView (NASA GIBS WMS layers), WorkspaceView
+│       ├── context/       # MissionContext & LanguageContext
+│       └── App.jsx        # Root application layout & event buses
+│
+├── workspace/             # Persistent Output Artifacts
+│   ├── reports/           # Generated .md Intelligence Reports
+│   └── sessions/          # Saved JSON mission session states
+│
+├── tests/                 # Integration & End-to-End Test Suite
+│   └── run_mock_tests.py  # Automated White-box & Black-box verification
+│
+├── docker-compose.yml     # Multi-container orchestration (Redis, API, UI)
+└── deploy.bat             # Production deployment script for Windows

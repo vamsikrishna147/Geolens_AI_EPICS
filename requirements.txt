@@ -1,0 +1,46 @@
+# GeoLens AI - Week 2 Dependencies
+# ==================================
+
+# ── Core AI Framework ─────────────────────────────
+crewai[tools,google-genai]>=0.100.0
+langchain-google-genai>=1.0.0
+
+# ── Environment & Config ──────────────────────────
+python-dotenv>=1.0.0
+
+# ── Data Validation ───────────────────────────────
+pydantic>=2.0.0
+
+# ── HTTP Requests (for all API tools) ────────────
+requests>=2.31.0
+
+# ── PostgreSQL + PostGIS ──────────────────────────
+psycopg2-binary>=2.9.9
+
+# ── Redis & MongoDB ───────────────────────────────
+redis>=5.0.0
+pymongo>=4.6.0
+
+# ── Google Earth Engine ───────────────────────────
+earthengine-api>=0.1.400
+
+# ── Geospatial Processing (Week 4 prep) ──────────
+geopandas>=0.14.0
+shapely>=2.0.0
+
+# ── Testing ───────────────────────────────────────
+pytest>=7.0.0
+
+# ── Week 3 Additions (Web Search, Screenshots, Charts) ──
+playwright>=1.40.0
+rasterio>=1.3.0
+matplotlib>=3.8.0
+
+# ── Week 4 Additions (GIS Processing Engine) ──────────
+folium>=0.15.0
+numpy>=1.24.0
+
+# ── Week 5 Additions (Web Dashboard) ──────────
+fastapi>=0.109.0
+uvicorn>=0.27.0
+jinja2>=3.1.3
