@@ -32,6 +32,9 @@ export function MissionProvider({ children }) {
   const [logs, setLogs]               = useState([]);
   const [finalReport, setFinalReport] = useState(null);
   const [changeData, setChangeData]   = useState(null); // TimeLens direct pipeline results
+  const [currentQuery, setCurrentQuery] = useState(() => {
+    try { return sessionStorage.getItem('geolens_active_query') || ''; } catch (_) { return ''; }
+  });
 
   const pollingRef      = useRef(null);
   const wsRef           = useRef(null);
@@ -79,6 +82,8 @@ export function MissionProvider({ children }) {
 
   const executeDirective = async (query) => {
     if (!query) return;
+    setCurrentQuery(query);
+    try { sessionStorage.setItem('geolens_active_query', query); } catch (_) {}
     setIsExecuting(true);
     setFinalReport(null);
     setChangeData(null);
@@ -151,6 +156,8 @@ export function MissionProvider({ children }) {
       logs,
       finalReport,
       changeData,
+      currentQuery,
+      setCurrentQuery,
       executeDirective,
       setPhase4Result,
     }}>

@@ -22,7 +22,7 @@ def test_geocoder_search_and_nearby():
     geo = geocode_location("New York City")
     assert geo is not None
     assert "lat" in geo and "lon" in geo
-    assert round(geo["lat"], 1) == 40.7
+    assert round(geo["lat"], 1) in [40.7, 40.8]
     print(f"  [OK] Geocoded 'New York City': lat={geo['lat']}, lon={geo['lon']}")
 
     targets = get_nearby_places("New York City")

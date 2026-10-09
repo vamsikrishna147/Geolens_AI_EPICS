@@ -67,7 +67,7 @@ export default function Dashboard() {
         {/* Pipeline Tracker */}
         <div className="flex justify-between bg-black border border-borderColor p-5 mt-4">
           {[{i:<Zap size={24}/>, t:'PLANNER'}, {i:<Database size={24}/>, t:'DISCOVERY'}, {i:<Download size={24}/>, t:'ACQUISITION'}, {i:<Layers size={24}/>, t:'GIS_OPS'}, {i:<Satellite size={24}/>, t:'ANALYSIS'}].map((step, idx) => (
-            <div key={idx} className={`text-center text-sm font-bold uppercase flex flex-col items-center gap-2 ${isExecuting ? 'text-laserGreen drop-shadow-[0_0_8px_#00FF00]' : 'text-borderColor'}`}>
+            <div key={idx} className={`text-center text-sm font-bold uppercase flex flex-col items-center gap-2 ${isExecuting ? 'text-laserGreen drop-shadow-sm' : 'text-borderColor'}`}>
               {step.i}
               {step.t}
             </div>

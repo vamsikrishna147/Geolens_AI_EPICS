@@ -150,17 +150,19 @@ def zonal_statistics(
             # Reproject zones to raster CRS
             zones_reprojected = result_gdf.to_crs(src.crs)
 
+            fill_nodata = float(src.nodata) if src.nodata is not None else -999999.0
             for idx, row in zones_reprojected.iterrows():
                 geom = [row.geometry]
                 try:
                     out_image, _ = rasterio.mask.mask(
-                        src, geom, crop=True, nodata=src.nodata
+                        src, geom, crop=True, nodata=fill_nodata
                     )
                     data = out_image[0].astype(float)
 
-                    # Mask nodata values
+                    # Mask nodata values (including sentinel fill for rasters without embedded nodata)
+                    data[data == fill_nodata] = np.nan
                     if src.nodata is not None:
-                        data[data == src.nodata] = np.nan
+                        data[data == float(src.nodata)] = np.nan
 
                     if np.all(np.isnan(data)):
                         continue

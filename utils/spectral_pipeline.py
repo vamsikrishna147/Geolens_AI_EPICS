@@ -67,13 +67,13 @@ def run_ndvi_change_pipeline(
         return {"error": "GEE not available", "pipeline": "ndvi_change"}
 
     COLLECTIONS = {
-        "sentinel2":  ("COPERNICUS/S2_SR_HARMONIZED", "B8",   "B4",  0.0001),
-        "landsat8":   ("LANDSAT/LC08/C02/T1_L2",      "SR_B5","SR_B4", 0.0000275),
-        "landsat9":   ("LANDSAT/LC09/C02/T1_L2",      "SR_B5","SR_B4", 0.0000275),
-        "modis":      ("MODIS/061/MOD13Q1",            "NDVI", None,   0.0001),
+        "sentinel2":  ("COPERNICUS/S2_SR_HARMONIZED", "B8",    "B4",   0.0001,    0.0,  "CLOUDY_PIXEL_PERCENTAGE"),
+        "landsat8":   ("LANDSAT/LC08/C02/T1_L2",      "SR_B5", "SR_B4", 0.0000275, -0.2, "CLOUD_COVER"),
+        "landsat9":   ("LANDSAT/LC09/C02/T1_L2",      "SR_B5", "SR_B4", 0.0000275, -0.2, "CLOUD_COVER"),
+        "modis":      ("MODIS/061/MOD13Q1",           "NDVI",  None,   0.0001,    0.0,  None),
     }
 
-    col_id, nir_band, red_band, scale = COLLECTIONS.get(
+    col_id, nir_band, red_band, scale, offset, cloud_prop = COLLECTIONS.get(
         dataset, COLLECTIONS["sentinel2"]
     )
 
@@ -83,6 +83,9 @@ def run_ndvi_change_pipeline(
             .filterBounds(aoi)
             .filterDate(f"{year}-01-01", f"{year}-12-31")
         )
+        if cloud_prop:
+            col = col.filter(ee.Filter.lt(cloud_prop, 30))
+
         if col.size().getInfo() == 0:
             return None
 
@@ -97,7 +100,8 @@ def run_ndvi_change_pipeline(
             ).getInfo()
             return stats.get("NDVI")
         else:
-            img = col.median().multiply(scale)
+            # Calibrate surface reflectance with scale and offset (USGS Landsat Collection 2 formula)
+            img = col.median().multiply(scale).add(offset)
             ndvi = img.normalizedDifference([nir_band, red_band]).rename("NDVI")
             stats = ndvi.reduceRegion(
                 reducer=ee.Reducer.mean(),
@@ -192,6 +196,7 @@ def run_ndwi_flood_pipeline(
             ee.ImageCollection(COL_ID)
             .filterBounds(aoi)
             .filterDate(start, end)
+            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
         )
         if col.size().getInfo() == 0:
             return None, None
@@ -304,7 +309,8 @@ def run_sar_flood_pipeline(
         )
         if col.size().getInfo() == 0:
             return None, None
-        vv_mean    = col.mean()
+        # Apply focal median filter (30m circle) for radar speckle suppression
+        vv_mean    = col.mean().focal_median(30, "circle", "meters")
         water_mask = vv_mean.lt(THRESHOLD)
         area_km2   = water_mask.multiply(ee.Image.pixelArea().divide(1e6)).reduceRegion(
             reducer=ee.Reducer.sum(),
@@ -324,9 +330,17 @@ def run_sar_flood_pipeline(
             "error": "No SAR data available for flood period",
         }
 
+    # True spatial inundation: newly flooded dry ground (wet during flood AND NOT wet in baseline)
     incremental = None
-    if flood_area is not None and base_area is not None:
-        incremental = round(float(flood_area) - float(base_area), 2)
+    if flood_mask is not None and base_mask is not None:
+        newly_flooded = flood_mask.And(base_mask.Not())
+        inc_area = newly_flooded.multiply(ee.Image.pixelArea().divide(1e6)).reduceRegion(
+            reducer=ee.Reducer.sum(),
+            geometry=aoi,
+            scale=10,
+            maxPixels=1e9,
+        ).getInfo().get("VV", 0)
+        incremental = round(float(inc_area), 2)
 
     # Classify
     if flood_area > 500:   severity = "CATASTROPHIC"
@@ -383,16 +397,18 @@ def run_wildfire_pipeline(
     NIR    = "SR_B5"
     SWIR   = "SR_B7"
     SCALE  = 0.0000275
+    OFFSET = -0.2
 
     def _nbr_mean(start: str, end: str) -> Optional[float]:
         col = (
             ee.ImageCollection(COL_ID)
             .filterBounds(aoi)
             .filterDate(start, end)
+            .filter(ee.Filter.lt("CLOUD_COVER", 30))
         )
         if col.size().getInfo() == 0:
             return None
-        img  = col.median().multiply(SCALE)
+        img  = col.median().multiply(SCALE).add(OFFSET)
         nbr  = img.normalizedDifference([NIR, SWIR]).rename("NBR")
         stats = nbr.reduceRegion(
             reducer=ee.Reducer.mean(),
@@ -404,12 +420,12 @@ def run_wildfire_pipeline(
 
     # Burned-area extent: dNBR > 0.1
     def _burned_area_km2(pre_start: str, pre_end: str, post_start: str, post_end: str) -> Optional[float]:
-        pre_col  = ee.ImageCollection(COL_ID).filterBounds(aoi).filterDate(pre_start, pre_end)
-        post_col = ee.ImageCollection(COL_ID).filterBounds(aoi).filterDate(post_start, post_end)
+        pre_col  = ee.ImageCollection(COL_ID).filterBounds(aoi).filterDate(pre_start, pre_end).filter(ee.Filter.lt("CLOUD_COVER", 30))
+        post_col = ee.ImageCollection(COL_ID).filterBounds(aoi).filterDate(post_start, post_end).filter(ee.Filter.lt("CLOUD_COVER", 30))
         if pre_col.size().getInfo() == 0 or post_col.size().getInfo() == 0:
             return None
-        pre_img  = pre_col.median().multiply(SCALE)
-        post_img = post_col.median().multiply(SCALE)
+        pre_img  = pre_col.median().multiply(SCALE).add(OFFSET)
+        post_img = post_col.median().multiply(SCALE).add(OFFSET)
         pre_nbr  = pre_img.normalizedDifference([NIR, SWIR]).rename("preNBR")
         post_nbr = post_img.normalizedDifference([NIR, SWIR]).rename("postNBR")
         dnbr     = pre_nbr.subtract(post_nbr).rename("dNBR")
@@ -582,6 +598,7 @@ def run_evi_pipeline(
         ee.ImageCollection(COL_ID)
         .filterBounds(aoi)
         .filterDate(start_date, end_date)
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
     )
     if col.size().getInfo() == 0:
         return {"pipeline": "evi", "location": location, "error": "No imagery found"}
@@ -656,6 +673,7 @@ def run_savi_pipeline(
         ee.ImageCollection(COL_ID)
         .filterBounds(aoi)
         .filterDate(start_date, end_date)
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
     )
     if col.size().getInfo() == 0:
         return {"pipeline": "savi", "location": location, "error": "No imagery found"}

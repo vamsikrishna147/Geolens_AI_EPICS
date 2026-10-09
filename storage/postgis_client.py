@@ -11,6 +11,7 @@ is not configured or unavailable.
 
 import json
 import os
+import threading
 from datetime import datetime
 from typing import Optional
 
@@ -94,6 +95,7 @@ class PostGISClient:
     """
 
     def __init__(self):
+        self._lock = threading.RLock()
         self.conn = None
         self._connected = False
         self._fallback_dir = os.path.join(
@@ -115,42 +117,47 @@ class PostGISClient:
             print("[PostGIS] Set POSTGIS_PASSWORD in .env to enable DB storage")
             return False
 
-        try:
-            self.conn = psycopg2.connect(
-                host=os.getenv("POSTGIS_HOST", "localhost"),
-                port=int(os.getenv("POSTGIS_PORT", "5432")),
-                dbname=os.getenv("POSTGIS_DB", "geolens"),
-                user=os.getenv("POSTGIS_USER", "postgres"),
-                password=pg_pass,
-                connect_timeout=5,
-            )
-            self.conn.autocommit = True
-            self._initialize_tables()
-            self._connected = True
-            print(f"[PostGIS] Connected to {os.getenv('POSTGIS_DB', 'geolens')} database")
-            return True
-        except Exception as e:
-            print(f"[PostGIS] Connection failed: {e}")
-            print("[PostGIS] Falling back to local file storage")
-            self.conn = None
-            return False
+        with self._lock:
+            try:
+                self.conn = psycopg2.connect(
+                    host=os.getenv("POSTGIS_HOST", "localhost"),
+                    port=int(os.getenv("POSTGIS_PORT", "5432")),
+                    dbname=os.getenv("POSTGIS_DB", "geolens"),
+                    user=os.getenv("POSTGIS_USER", "postgres"),
+                    password=pg_pass,
+                    connect_timeout=5,
+                )
+                self.conn.autocommit = True
+                self._initialize_tables()
+                self._connected = True
+                print(f"[PostGIS] Connected to {os.getenv('POSTGIS_DB', 'geolens')} database")
+                return True
+            except Exception as e:
+                print(f"[PostGIS] Connection failed: {e}")
+                print("[PostGIS] Falling back to local file storage")
+                self.conn = None
+                self._connected = False
+                return False
 
     def _initialize_tables(self) -> None:
         """Create GeoLens tables if they don't exist."""
-        with self.conn.cursor() as cur:
-            cur.execute(self.INIT_SQL)
+        with self._lock:
+            if self.conn:
+                with self.conn.cursor() as cur:
+                    cur.execute(self.INIT_SQL)
 
     @property
     def is_connected(self) -> bool:
         """Check if PostGIS connection is active."""
-        if self.conn is None:
-            return False
-        try:
-            self.conn.cursor().execute("SELECT 1")
-            return True
-        except Exception:
-            self._connect()
-            return self._connected
+        with self._lock:
+            if self.conn is None:
+                return False
+            try:
+                self.conn.cursor().execute("SELECT 1")
+                return True
+            except Exception:
+                self._connect()
+                return self._connected
 
     def log_query(self, query_id: str, user_query: str, location: str = "", time_period: str = "") -> bool:
         """Log a user query to the database."""
@@ -161,17 +168,18 @@ class PostGISClient:
                 "location": location,
                 "time_period": time_period,
             })
-        try:
-            with self.conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO query_log (query_id, user_query, location, time_period)
-                       VALUES (%s, %s, %s, %s)""",
-                    (query_id, user_query, location, time_period),
-                )
-            return True
-        except Exception as e:
-            print(f"[PostGIS] Failed to log query: {e}")
-            return False
+        with self._lock:
+            try:
+                with self.conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO query_log (query_id, user_query, location, time_period)
+                           VALUES (%s, %s, %s, %s)""",
+                        (query_id, user_query, location, time_period),
+                    )
+                return True
+            except Exception as e:
+                print(f"[PostGIS] Failed to log query: {e}")
+                return False
 
     def save_geojson(
         self,
@@ -209,31 +217,32 @@ class PostGISClient:
             return len(features)
 
         count = 0
-        try:
-            with self.conn.cursor() as cur:
-                for feature in features:
-                    geometry = feature.get("geometry")
-                    properties = feature.get("properties", {})
-                    if not geometry:
-                        continue
-                    cur.execute(
-                        """INSERT INTO geo_features
-                               (query_id, source, feature_type, properties, geom)
-                           VALUES (%s, %s, %s, %s, ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326))""",
-                        (
-                            query_id,
-                            source,
-                            feature_type,
-                            json.dumps(properties),
-                            json.dumps(geometry),
-                        ),
-                    )
-                    count += 1
-            print(f"[PostGIS] Saved {count} {feature_type} features from {source}")
-        except Exception as e:
-            print(f"[PostGIS] Error saving GeoJSON: {e}")
-            self._fallback_write(f"geojson/{source}", query_id or source, geojson)
-            count = len(features)
+        with self._lock:
+            try:
+                with self.conn.cursor() as cur:
+                    for feature in features:
+                        geometry = feature.get("geometry")
+                        properties = feature.get("properties", {})
+                        if not geometry:
+                            continue
+                        cur.execute(
+                            """INSERT INTO geo_features
+                                   (query_id, source, feature_type, properties, geom)
+                               VALUES (%s, %s, %s, %s, ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326))""",
+                            (
+                                query_id,
+                                source,
+                                feature_type,
+                                json.dumps(properties),
+                                json.dumps(geometry),
+                            ),
+                        )
+                        count += 1
+                print(f"[PostGIS] Saved {count} {feature_type} features from {source}")
+            except Exception as e:
+                print(f"[PostGIS] Error saving GeoJSON: {e}")
+                self._fallback_write(f"geojson/{source}", query_id or source, geojson)
+                count = len(features)
 
         return count
 
@@ -241,33 +250,35 @@ class PostGISClient:
         """Save an analysis result (JSON) to the analysis_results table."""
         if not self.is_connected:
             return self._fallback_write(f"results/{result_type}", query_id, data)
-        try:
-            with self.conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO analysis_results (query_id, result_type, result_data)
-                       VALUES (%s, %s, %s)""",
-                    (query_id, result_type, json.dumps(data)),
-                )
-            return True
-        except Exception as e:
-            print(f"[PostGIS] Failed to save result: {e}")
-            return self._fallback_write(f"results/{result_type}", query_id, data)
+        with self._lock:
+            try:
+                with self.conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO analysis_results (query_id, result_type, result_data)
+                           VALUES (%s, %s, %s)""",
+                        (query_id, result_type, json.dumps(data)),
+                    )
+                return True
+            except Exception as e:
+                print(f"[PostGIS] Failed to save result: {e}")
+                return self._fallback_write(f"results/{result_type}", query_id, data)
 
     def index_file(self, query_id: str, source: str, file_type: str, file_path: str, metadata: dict = None) -> bool:
         """Register a downloaded file in the data_files index table."""
         if not self.is_connected:
             return True  # No-op if no DB
-        try:
-            with self.conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO data_files (query_id, source, file_type, file_path, metadata)
-                       VALUES (%s, %s, %s, %s, %s)""",
-                    (query_id, source, file_type, file_path, json.dumps(metadata or {})),
-                )
-            return True
-        except Exception as e:
-            print(f"[PostGIS] Failed to index file: {e}")
-            return False
+        with self._lock:
+            try:
+                with self.conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO data_files (query_id, source, file_type, file_path, metadata)
+                           VALUES (%s, %s, %s, %s, %s)""",
+                        (query_id, source, file_type, file_path, json.dumps(metadata or {})),
+                    )
+                return True
+            except Exception as e:
+                print(f"[PostGIS] Failed to index file: {e}")
+                return False
 
     def query_features(
         self, source: str = None, feature_type: str = None, query_id: str = None, limit: int = 100
@@ -275,34 +286,66 @@ class PostGISClient:
         """Query stored features from the database."""
         if not self.is_connected:
             return []
-        try:
-            conditions = []
-            params = []
-            if source:
-                conditions.append("source = %s")
-                params.append(source)
-            if feature_type:
-                conditions.append("feature_type = %s")
-                params.append(feature_type)
-            if query_id:
-                conditions.append("query_id = %s")
-                params.append(query_id)
+        with self._lock:
+            try:
+                conditions = []
+                params = []
+                if source:
+                    conditions.append("source = %s")
+                    params.append(source)
+                if feature_type:
+                    conditions.append("feature_type = %s")
+                    params.append(feature_type)
+                if query_id:
+                    conditions.append("query_id = %s")
+                    params.append(query_id)
 
-            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-            params.append(limit)
+                where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+                params.append(limit)
 
-            with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(
-                    f"""SELECT id, query_id, source, feature_type, properties,
-                               ST_AsGeoJSON(geom) as geometry, collected_at
-                        FROM geo_features {where}
-                        ORDER BY collected_at DESC LIMIT %s""",
-                    params,
-                )
-                return [dict(row) for row in cur.fetchall()]
-        except Exception as e:
-            print(f"[PostGIS] Query error: {e}")
-            return []
+                with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(
+                        f"""SELECT id, query_id, source, feature_type, properties,
+                                   ST_AsGeoJSON(geom) as geometry, collected_at
+                            FROM geo_features {where}
+                            ORDER BY collected_at DESC LIMIT %s""",
+                        params,
+                    )
+                    return [dict(row) for row in cur.fetchall()]
+            except Exception as e:
+                print(f"[PostGIS] Query error: {e}")
+                return []
+
+    def stats(self) -> dict:
+        """Return PostGIS operational status and metrics."""
+        if not self.is_connected:
+            return {"connected": False}
+        with self._lock:
+            try:
+                with self.conn.cursor() as cur:
+                    cur.execute("SELECT PostGIS_Full_Version();")
+                    pgis_ver = cur.fetchone()[0].split(";")[0]
+                    cur.execute("""
+                        SELECT
+                            (SELECT COUNT(*) FROM geo_features) AS geo_features,
+                            (SELECT COUNT(*) FROM analysis_results) AS analysis_results,
+                            (SELECT COUNT(*) FROM query_log) AS query_log,
+                            (SELECT COUNT(*) FROM data_files) AS data_files
+                    """)
+                    row = cur.fetchone()
+                    return {
+                        "connected": True,
+                        "database": os.getenv("POSTGIS_DB", "geolens"),
+                        "postgis_version": pgis_ver,
+                        "table_counts": {
+                            "geo_features": row[0],
+                            "analysis_results": row[1],
+                            "query_log": row[2],
+                            "data_files": row[3],
+                        }
+                    }
+            except Exception as e:
+                return {"connected": False, "error": str(e)}
 
     def _fallback_write(self, subfolder: str, filename: str, data: dict) -> bool:
         """Write data to a local JSON file as fallback when DB is unavailable."""
@@ -320,10 +363,11 @@ class PostGISClient:
 
     def close(self):
         """Close the database connection."""
-        if self.conn:
-            self.conn.close()
-            self.conn = None
-            self._connected = False
+        with self._lock:
+            if self.conn:
+                self.conn.close()
+                self.conn = None
+                self._connected = False
 
 
 # Singleton instance

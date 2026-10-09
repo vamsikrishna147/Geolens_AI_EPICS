@@ -1,5 +1,5 @@
 import React from 'react';
-import { Flame, Waves, Mountain } from 'lucide-react';
+import { Flame, Waves, Mountain, Satellite } from 'lucide-react';
 
 export default function SatelliteData() {
   return (

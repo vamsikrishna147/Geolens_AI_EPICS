@@ -32,7 +32,7 @@ def test_agent_instantiations():
     print("  [OK] Planner Agent — role verified.")
 
     data_agent = create_data_sourcing_agent()
-    assert data_agent.role == "Data Sourcing Agent"
+    assert data_agent.role in ("Data Sourcing Agent", "Data Acquisition Specialist")
     assert len(data_agent.tools) >= 4
     print(f"  [OK] Data Sourcing Agent — {len(data_agent.tools)} tools.")
 

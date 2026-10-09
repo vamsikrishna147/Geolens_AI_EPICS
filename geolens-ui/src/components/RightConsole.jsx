@@ -21,13 +21,13 @@ const PHASES = [
     label: '02  DATA ACQUISITION',
     description: 'Fetching satellite datasets',
     agent: 'acquisition',
-    color: 'text-blue-400',
+    color: ' text-mc-text',
   },
   {
     label: '03  GIS PROCESSING',
     description: 'Spatial ops & map generation',
     agent: 'gis',
-    color: 'text-purple-400',
+    color: ' text-mc-text',
   },
   {
     label: '04  EARTH OBSERVATION',
@@ -83,7 +83,7 @@ function PhaseRow({ phase, status, isLast }) {
           {/* Running pulse bar */}
           {isRunning && (
             <div className="h-1 w-12 bg-mc-border/30 rounded overflow-hidden shrink-0">
-              <div className="h-full bg-mc-primary rounded animate-pulse" style={{ width: '60%' }} />
+              <div className="h-full bg-mc-primary rounded" style={{ width: '60%' }} />
             </div>
           )}
         </div>
@@ -102,7 +102,7 @@ function PhaseRow({ phase, status, isLast }) {
 // ── Main Console ──────────────────────────────────────────────────────
 
 export default function RightConsole() {
-  const { agents, finalReport } = useMission();
+  const { agents, finalReport, currentQuery } = useMission();
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState('telemetry');
 
@@ -112,10 +112,10 @@ export default function RightConsole() {
   const openTimeLens = useCallback(() => window.dispatchEvent(new CustomEvent('show-timelens')), []);
 
   return (
-    <aside className="w-72 skeuo-panel flex flex-col h-full overflow-hidden">
+    <aside className="w-72 bg-mc-panel/95 backdrop-blur-md border border-mc-border rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] flex flex-col h-full overflow-hidden">
 
       {/* Tab selector */}
-      <div className="flex shrink-0 p-1.5 m-3 mb-2 bg-black/20 rounded-xl">
+      <div className="flex shrink-0 p-1 m-3 mb-2 bg-mc-bg rounded-lg border border-mc-border">
         <TabButton
           active={activeTab === 'telemetry'}
           onClick={() => setActiveTab('telemetry')}
@@ -131,10 +131,10 @@ export default function RightConsole() {
       </div>
 
       {activeTab === 'telemetry' ? (
-        <div className="flex-1 overflow-y-auto flex flex-col min-h-0 px-3 pb-3">
+        <div className="flex-1 overflow-y-auto flex flex-col min-h-0 px-3 pb-3 mt-2">
 
           {/* Section header */}
-          <p className="text-[9px] font-mono tracking-[0.2em] text-mc-muted uppercase mb-3 shrink-0">
+          <p className="text-[10px] font-heading font-semibold tracking-[0.15em] text-mc-muted uppercase mb-3 shrink-0">
             Agent Pipeline
           </p>
 
@@ -152,17 +152,17 @@ export default function RightConsole() {
 
           {/* Post-completion actions */}
           {allComplete && (
-            <div className="flex flex-col gap-2 mt-4 animate-in fade-in slide-in-from-bottom-2 duration-300 shrink-0">
+            <div className="flex flex-col gap-2 mt-4 animate-in fade-in slide-in- duration-300 shrink-0">
               <button
                 onClick={openReport}
-                className="w-full py-2.5 px-4 rounded-xl bg-mc-primary hover:bg-mc-secondary text-white font-mono text-xs tracking-wider font-semibold transition-all duration-200 flex items-center justify-center gap-2 shadow-[0_0_14px_rgba(47,129,247,0.3)] hover:shadow-[0_0_20px_rgba(47,129,247,0.45)]"
+                className="w-full py-2.5 px-4 rounded-lg skeuo-button-primary font-mono text-xs tracking-wider font-semibold flex items-center justify-center gap-2"
               >
                 <FileText size={14} />
                 {t('VIEW INTELLIGENCE REPORT')}
               </button>
               <button
                 onClick={openTimeLens}
-                className="w-full py-2.5 px-4 rounded-xl skeuo-button border border-mc-border hover:border-mc-primary/40 text-mc-text font-mono text-xs tracking-wider transition-all duration-200 flex items-center justify-center gap-2"
+                className="w-full py-2.5 px-4 rounded-lg skeuo-button font-mono text-xs tracking-wider flex items-center justify-center gap-2"
               >
                 <Clock size={14} />
                 {t('OPEN TIMELENS')}
@@ -175,7 +175,7 @@ export default function RightConsole() {
             <div className="mt-4 shrink-0 animate-in fade-in duration-500">
               <button
                 onClick={openTimeLens}
-                className="w-full py-2.5 px-4 rounded-xl skeuo-button border border-mc-border/60 text-mc-muted hover:text-mc-text font-mono text-xs tracking-wider transition-all duration-200 flex items-center justify-center gap-2"
+                className="w-full py-2.5 px-4 rounded-lg skeuo-button font-mono text-xs tracking-wider flex items-center justify-center gap-2"
               >
                 <Clock size={14} />
                 QUICK LAUNCH TIMELENS
@@ -184,7 +184,15 @@ export default function RightConsole() {
           )}
         </div>
       ) : (
-        <AssistantChat />
+        <AssistantChat
+          storageKey="assistant_chat_mission"
+          context={{
+            scope: 'mission_control',
+            query: currentQuery || 'Active Directive',
+            agents,
+            report: finalReport
+          }}
+        />
       )}
     </aside>
   );
@@ -194,8 +202,8 @@ function TabButton({ active, onClick, Icon, label }) {
   return (
     <button
       onClick={onClick}
-      className={`flex-1 py-1.5 text-[10px] font-mono tracking-widest rounded-lg transition-all duration-200 flex justify-center items-center gap-1.5 ${
-        active ? 'skeuo-button text-mc-primary' : 'text-mc-muted hover:text-mc-text'
+      className={`flex-1 py-2 text-[11px] font-heading font-semibold tracking-wider rounded-lg transition-all duration-150 flex justify-center items-center gap-1.5 cursor-pointer ${
+        active ? 'bg-mc-panel text-mc-primary border border-mc-border shadow-sm' : 'text-mc-muted hover:text-mc-text border border-transparent'
       }`}
     >
       <Icon size={13} />

@@ -65,7 +65,11 @@ class OSMTool(BaseTool):
     )
     args_schema: Type[BaseModel] = OSMToolInput
 
-    OVERPASS_URL: ClassVar[str] = "https://overpass-api.de/api/interpreter"
+    OVERPASS_URLS: ClassVar[list[str]] = [
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    ]
 
     def _run(self, location: str, feature_types: Optional[str] = None, query_id: str = "") -> str:
         if not feature_types:
@@ -96,25 +100,35 @@ class OSMTool(BaseTool):
                 query_parts.append(f"{t}({bbox_overpass});")
 
         overpass_query = f"""
-        [out:json][timeout:30];
+        [out:json][timeout:25];
         (
           {chr(10).join(query_parts)}
         );
         out body geom;
         """
 
-        try:
-            time.sleep(0.5)  # Be respectful of rate limits
-            response = requests.post(
-                self.OVERPASS_URL,
-                data=overpass_query,
-                timeout=45,
-                headers={"User-Agent": "GeoLensAI/1.0"},
-            )
-            response.raise_for_status()
-            osm_data = response.json()
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Overpass API error: {str(e)}"})
+        osm_data = None
+        last_error = "Unknown error"
+        for endpoint in self.OVERPASS_URLS:
+            try:
+                time.sleep(0.3)
+                response = requests.post(
+                    endpoint,
+                    data=overpass_query,
+                    timeout=25,
+                    headers={"User-Agent": "GeoLensAI/2.0"},
+                )
+                if response.status_code == 200:
+                    osm_data = response.json()
+                    break
+                else:
+                    last_error = f"{response.status_code} {response.reason}"
+            except requests.RequestException as e:
+                last_error = str(e)
+                continue
+
+        if not osm_data:
+            return json.dumps({"error": f"Overpass API error: {last_error}"})
 
         elements = osm_data.get("elements", [])
 

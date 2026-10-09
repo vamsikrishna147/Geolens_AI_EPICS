@@ -56,12 +56,14 @@ GEE_COLLECTIONS = {
         "description": "Landsat 8 Surface Reflectance (30m)",
         "bands": {"red": "SR_B4", "green": "SR_B3", "blue": "SR_B2", "nir": "SR_B5", "swir1": "SR_B6", "thermal": "ST_B10"},
         "scale_factor": 0.0000275,
+        "offset": -0.2,
     },
     "landsat9": {
         "id": "LANDSAT/LC09/C02/T1_L2",
         "description": "Landsat 9 Surface Reflectance (30m)",
         "bands": {"red": "SR_B4", "green": "SR_B3", "blue": "SR_B2", "nir": "SR_B5"},
         "scale_factor": 0.0000275,
+        "offset": -0.2,
     },
     "modis": {
         "id": "MODIS/061/MOD13Q1",
@@ -231,6 +233,10 @@ class GEETool(BaseTool):
             .filterBounds(aoi)
             .filterDate(start_date, end_date)
         )
+        if "sentinel2" in cfg["id"].lower():
+            collection = collection.filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
+        elif "landsat" in cfg["id"].lower():
+            collection = collection.filter(ee.Filter.lt("CLOUD_COVER", 30))
 
         # Get collection info
         count = collection.size().getInfo()
@@ -300,8 +306,9 @@ class GEETool(BaseTool):
         nir = bands.get("nir", "B8")
         red = bands.get("red", "B4")
         scale = cfg.get("scale_factor", 1)
+        offset = cfg.get("offset", 0.0)
 
-        image = collection.median().multiply(scale)
+        image = collection.median().multiply(scale).add(offset)
         ndvi = image.normalizedDifference([nir, red]).rename("NDVI")
         stats = ndvi.reduceRegion(
             reducer=ee.Reducer.mean().combine(ee.Reducer.minMax(), sharedInputs=True),
@@ -460,8 +467,9 @@ class GEETool(BaseTool):
         nir   = bands.get("nir", "SR_B5")
         # Landsat SWIR-2 for wildfire mapping
         scale = cfg.get("scale_factor", 0.0000275)
+        offset = cfg.get("offset", -0.2 if "SR_B5" in bands.values() else 0.0)
 
-        image = collection.median().multiply(scale)
+        image = collection.median().multiply(scale).add(offset)
 
         # Attempt SWIR-2 (B7 Landsat) — Sentinel-2 uses B12
         swir_band = "SR_B7" if "SR_B5" in bands.values() else "B12"

@@ -7,13 +7,14 @@ import {
 import { useLanguage } from '../context/LanguageContext';
 import { useMission } from '../context/MissionContext';
 import axios from 'axios';
+import { API_BASE_URL } from '../config/api';
 
 // ── Local session workspace ───────────────────────────────────────────
 // Missions are now fetched from the backend's workspace/sessions/ directory
-// (persisted via Docker volume), with sessionStorage as a fast write cache.
+// with sessionStorage as a fast write cache.
 
 const SESSION_KEY = 'geolens_workspace';
-const API = 'http://localhost:8000';
+const API = API_BASE_URL;
 
 function loadSessionMissions() {
   try {
@@ -138,7 +139,7 @@ export default function WorkspaceView({ onBack }) {
   );
 
   return (
-    <div className="absolute inset-0 bg-mc-bg/95 backdrop-blur-xl z-40 flex animate-in fade-in zoom-in-95 duration-300">
+    <div className="absolute inset-0 bg-mc-bg/95 z-40 flex animate-in fade-in zoom-in-95 duration-300">
       <div className="flex-1 max-w-5xl mx-auto h-full flex flex-col p-8">
 
         {/* Header */}
@@ -187,7 +188,7 @@ export default function WorkspaceView({ onBack }) {
             filtered.map(item => (
               <div
                 key={item.id}
-                className="bg-mc-panel border border-mc-border rounded-2xl p-5 flex items-center justify-between group hover:border-mc-primary/40 transition-all duration-200"
+                className="bg-mc-panel border border-mc-border rounded-2xl p-5 flex items-center justify-between group hover:border-mc-border transition-all duration-200"
               >
                 <div className="flex items-center gap-5 min-w-0">
                   <MissionIcon type={item.status} />
@@ -209,14 +210,14 @@ export default function WorkspaceView({ onBack }) {
                 <div className="flex items-center gap-2 shrink-0 ml-4">
                   <button
                     onClick={() => handleShare(item)}
-                    className="p-2.5 bg-mc-bg border border-mc-border text-mc-muted hover:text-mc-primary hover:border-mc-primary/40 rounded-lg transition-all"
+                    className="p-2.5 bg-mc-bg border border-mc-border text-mc-muted hover:text-mc-primary hover:border-mc-border rounded-lg transition-all"
                     title="Copy to clipboard"
                   >
                     <Share2 size={16} />
                   </button>
                   <button
                     onClick={() => handleDownload(item)}
-                    className="p-2.5 bg-mc-primary text-white hover:bg-mc-secondary rounded-lg transition-all shadow-[0_0_8px_rgba(47,129,247,0.3)]"
+                    className="p-2.5 bg-mc-primary text-white hover:bg-mc-secondary rounded-lg transition-all shadow-sm"
                     title="Download JSON"
                   >
                     <Download size={16} />

@@ -179,7 +179,22 @@ const translations = {
 const LanguageContext = createContext();
 
 export function LanguageProvider({ children }) {
-  const [language, setLanguage] = useState('en');
+  const [language, setLanguageState] = useState(() => {
+    try {
+      return localStorage.getItem('geolens_language') || 'en';
+    } catch {
+      return 'en';
+    }
+  });
+
+  const setLanguage = (lang) => {
+    setLanguageState(lang);
+    try {
+      localStorage.setItem('geolens_language', lang);
+    } catch {
+      // ignore
+    }
+  };
 
   const t = (key) => {
     if (!key) return '';

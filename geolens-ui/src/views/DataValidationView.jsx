@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Database, ShieldCheck, Activity, Link, Server, ChevronRight, CheckCircle2, Lock, Loader2 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import axios from 'axios';
+import { getApiUrl } from '../config/api';
 
 const SOURCES = [
   { id: 1, name: 'NASA Landsat 9', status: 'Active', latency: '42ms', validation: 'Cryptographic Hash Match', accuracy: '99.9%', url: 'usgs.gov' },
@@ -17,10 +18,10 @@ export default function DataValidationView({ onBack }) {
   useEffect(() => {
     async function fetchTelemetry() {
       try {
-        const res = await axios.get('http://localhost:8000/api/telemetry');
+        const res = await axios.get(getApiUrl('/api/telemetry'));
         setTelemetry(res.data);
       } catch (err) {
-        console.error("Failed to fetch telemetry", err);
+        console.warn("Telemetry fetch error:", err.message);
       } finally {
         setLoading(false);
       }
@@ -33,7 +34,7 @@ export default function DataValidationView({ onBack }) {
   }, []);
 
   return (
-    <div className="absolute inset-0 bg-mc-bg/95 backdrop-blur-xl z-40 flex animate-in fade-in zoom-in-95 duration-300">
+    <div className="absolute inset-0 bg-mc-bg/95 z-40 flex animate-in fade-in zoom-in-95 duration-300">
       <div className="flex-1 max-w-7xl mx-auto h-full flex flex-col p-8">
         
         {/* Header */}
@@ -72,7 +73,7 @@ export default function DataValidationView({ onBack }) {
             </div>
           </div>
           <div className="bg-mc-panel border border-mc-border p-6 rounded-xl flex items-center gap-4">
-            <div className="p-3 bg-purple-500/10 text-purple-400 rounded-lg"><Lock size={24} /></div>
+            <div className="p-3 bg-mc-panel text-mc-text rounded-lg"><Lock size={24} /></div>
             <div>
               <p className="text-xs text-mc-muted font-mono">MISSIONS COMPLETED</p>
               <p className="text-xl font-bold text-mc-text mt-1">
@@ -81,7 +82,7 @@ export default function DataValidationView({ onBack }) {
             </div>
           </div>
           <div className="bg-mc-panel border border-mc-border p-6 rounded-xl flex items-center gap-4">
-            <div className="p-3 bg-blue-500/10 text-blue-400 rounded-lg"><Database size={24} /></div>
+            <div className="p-3 bg-mc-panel text-mc-text rounded-lg"><Database size={24} /></div>
             <div>
               <p className="text-xs text-mc-muted font-mono">DATA INGESTED</p>
               <p className="text-xl font-bold text-mc-text mt-1">
@@ -113,7 +114,7 @@ export default function DataValidationView({ onBack }) {
                   <div>
                     <p className="text-[10px] text-mc-muted font-mono uppercase tracking-widest mb-1">Latency</p>
                     <p className="text-sm font-mono text-mc-text flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-mc-success animate-pulse"></span> {source.latency}
+                      <span className="w-2 h-2 rounded-full bg-mc-success"></span> {source.latency}
                     </p>
                   </div>
                   <div>

@@ -46,6 +46,15 @@ class ScreenshotTool(BaseTool):
         wait_time_seconds: int = 5,
         query_id: str = "",
     ) -> str:
+        import urllib.parse
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return json.dumps({"error": f"Invalid URL scheme '{parsed.scheme}'. Only HTTP and HTTPS are permitted."})
+        hostname = (parsed.hostname or "").lower()
+        if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254", "metadata.google.internal") or hostname.startswith("192.168.") or hostname.startswith("10.") or hostname.endswith(".local"):
+            return json.dumps({"error": f"Access to private or local network address '{hostname}' is forbidden."})
+        wait_time_seconds = max(1, min(int(wait_time_seconds), 15))
+
         print(f"[ScreenshotTool] Capturing {url} (Waiting {wait_time_seconds}s)")
         
         # Ensure screenshot directory exists

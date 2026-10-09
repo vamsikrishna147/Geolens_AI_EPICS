@@ -139,8 +139,11 @@ class MapTool(BaseTool):
             mapper.add_layer_control()
 
             # Save
-            safe_title = title.lower().replace(" ", "_")[:30]
-            output_path = os.path.join(maps_dir, f"{safe_title}.html")
+            import re
+            clean_title = re.sub(r'[^a-zA-Z0-9_\-]', '', os.path.basename(title).replace(" ", "_"))[:30] or "geolens_map"
+            output_path = os.path.join(maps_dir, f"{clean_title}.html")
+            if os.path.commonpath([maps_dir, os.path.abspath(output_path)]) != maps_dir:
+                return json.dumps({"error": "Invalid destination path for map."})
             saved_path = mapper.save(output_path=output_path)
 
         except Exception as e:

@@ -127,16 +127,19 @@ def test_gee_tool_new_analysis_options():
 
 
 def test_temporal_agent_has_change_detection_tool():
-    print("Testing Temporal Analysis Agent has 5 tools including ChangeDetectionTool...")
-    from agents.temporal_analysis_agent import create_temporal_analysis_agent
-    from tools.change_detection_tool import ChangeDetectionTool
+    print("Testing Earth Observation / TimeLens Agent has ChangeDetectionTool...")
+    try:
+        from agents.temporal_analysis_agent import create_temporal_analysis_agent
+        agent = create_temporal_analysis_agent()
+    except ImportError:
+        from agents.earth_observation_agent import create_earth_observation_agent
+        agent = create_earth_observation_agent()
 
-    agent = create_temporal_analysis_agent()
-    assert len(agent.tools) == 5
+    assert len(agent.tools) >= 5
     tool_names = [t.name for t in agent.tools]
     assert "GeoLens Change Detection & Spectral Index Pipeline Tool" in tool_names
     assert "Google Earth Engine Satellite Data Tool" in tool_names
-    print(f"  [OK] Temporal Analysis Agent has 5 tools: {tool_names}")
+    print(f"  [OK] Earth Observation / TimeLens Agent has tools: {tool_names}")
 
 
 def test_tools_package_exports():

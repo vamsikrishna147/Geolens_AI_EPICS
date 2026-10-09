@@ -29,6 +29,7 @@ geocode_cache.json
 # OS generated files
 .DS_Store
 Thumbs.db
+*.lnk
 
 # IDEs
 .vscode/

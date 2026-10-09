@@ -1,0 +1,112 @@
+# GeoLens AI — Current Status
+
+- **Status**: Operational & Production-Polished
+- **Backend**: FastAPI running on port 8000 (`venv\Scripts\uvicorn.exe api.server:app --port 8000`)
+- **Frontend**: Vite + React 19 running on port 5173 (`npm run dev` in `geolens-ui/`)
+- **Portals**:
+  - `/` — User Portal (Mission Control, Map & Analyzer, TimeLens, Workspace)
+  - `/admin` — Admin Portal (System telemetry, 5-agent fleet status, LLM pool balancer, geocache maintenance, network latency)
+- **Security & APIs**:
+  - Environment-based API routing via `geolens-ui/src/config/api.js` (`VITE_API_BASE_URL`)
+  - All secret keys quarantined in server environment variables
+  - Python structured logging configured; raw print statements replaced
+- **Resilience**:
+  - `apiFetch` with timeout controller for slow internet
+  - Responsive mobile drawer and layout for viewports < 768px
+- **Backend Audit & Hardening**:
+  - Static map routing enabled (`/maps` mount)
+  - Path traversal protections and input sanitization added across download/session endpoints
+  - SAR fallback pipeline contract aligned with GEE Geometry specifications
+  - WebSocket lifecycle connection management and exception cleanup fortified
+- **Remote Sensing & CrewAI Fleet Hardening**:
+  - Calibrated Landsat Collection 2 Level 2 surface reflectance scale (`0.0000275`) and offset (`-0.2`)
+  - Integrated optical cloud filtering (`CLOUDY_PIXEL_PERCENTAGE` / `CLOUD_COVER` < 30%)
+  - Applied SAR speckle focal filtering and spatial difference inundation modeling
+  - Fortified Zonal Statistics against nodata-null distortion
+- **External API & Data Integration**:
+  - GEE, Sentinel, Landsat, Open-Meteo, OSM, Photon, and FIRMS edge-case verified
+  - Zero-fabrication confirmed: unavailable dates, invalid AOIs, and network timeouts return explicit nulls/errors
+- **Frontend UX & Journey Polish**:
+  - Activated AOI Quick Map modal with idiomatic React state and dedicated trigger button
+  - Fortified `ScientificReport.jsx` with mobile-responsive grids, responsive typography, and accessible touch targets
+  - Production build verified (Vite production bundle compiled with 0 errors)
+- **QA Automation & Adversarial Stress Testing**:
+  - Existing suite verified (55 passing across units, tools, and integration)
+  - Created automated adversarial test matrix (`tests/test_qa_matrix.py`) with 14 stress tests passing
+  - Documented edge cases across date inversions, invalid AOIs, OpenAlex rate limits, and Windows charmap encoding
+- **Database & Cache Architecture (PostGIS, MongoDB, Redis)**:
+  - **PostgreSQL / PostGIS (5432)**: Active PostGIS 3.6.2 extension; re-entrant thread locking (`threading.RLock`) added to eliminate connection race conditions across concurrent CrewAI agents; SQL parameterization verified across all CRUD queries; full operational metrics exposed.
+  - **MongoDB (27017)**: Connected to `geolens_logs`; collection name regex validation enforced (`^[a-zA-Z0-9_\-]+$`) against namespace pollution; automated compound indexing on `query_id` and `timestamp`; read query helper (`get_logs`) implemented.
+  - **Redis Cache (6379)**: Successfully integrated into `StorageManager` and `utils/geocoder.py`; socket timeouts configured (`2s`); accelerates geocoding and keystroke autocomplete suggestions to sub-millisecond response times with TTL expiration and prefix purging; reported live in `/api/admin/system`.
+  - **Storage Fallback & Verification**: Graceful degradation to local file storage verified if any DB service drops; automated test suite (`tests/test_storage_backends.py`) with 13 comprehensive tests passing.
+- **Recent UX Polish & Presentation Readiness**:
+  - **Black Space Elimination**: Removed antimeridian-crossing polygon triangulation in `GlobeBackground.jsx`; 3D Earth globe renders with uninterrupted NASA Blue Marble realism during execution.
+  - **Universal Movable Navigation Dock**: Re-architected `LeftNav.jsx` into a floating, draggable widget (`z-[9999]`) persisting across all views (Mission Control, TimeLens, Map & Analyzer, Reports) with viewport boundary clamping and `localStorage` position retention.
+  - **TimeLens Context Retention**: Stored and restored active queries, year baseline/comparison, coordinate bounds, and mode in `sessionStorage`; guarantees zero context loss when navigating between tabs.
+  - **I18n & High-Speed Image Export**: Geocoding and auto-complete results return strictly in user-selected language; resolved TimeLens image download async handler with sub-second disk caching.
+  - **Multi-Provider 4-Slot Round-Robin LLM Pool (Groq + Dual Gemini + Ollama)**:
+    - Integrated Groq Cloud API (`GROQ_API_KEY`, `GROQ_MODEL=llama-3.3-70b-versatile`, `GROQ_BASE_URL`) into [utils/llm_manager.py](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/utils/llm_manager.py) alongside Gemini Dual-Key rotation and local Ollama.
+    - Permanent 4-slot interleaved pool: `GEMINI_KEY_1` -> `GROQ_KEY_1` -> `GEMINI_KEY_2` -> `OLLAMA`.
+    - Automated agent distribution: in [crews/geolens_crew.py](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/crews/geolens_crew.py), all 5 agents (Planner, Data Sourcing, GIS, EO, Reporting) draw sequentially from the pool to balance rate limits (RPM/RPD).
+    - Unconfigured key resilience: unconfigured slots report `configured: False` and `available: False` ("KEY REQUIRED") without crashing or blocking active providers.
+    - Dynamic key management: added `POST /api/admin/llm_keys` in [api/server.py](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/api/server.py) with live in-memory re-arming and `.env` persistence.
+    - Admin Console enhancement: overhauled [AdminPortal.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/pages/AdminPortal.jsx) with provider badges (`GROQ`, `GEMINI`, `OLLAMA`), live status pills (`AVAILABLE`, `KEY REQUIRED`, `COOLDOWN`, `OFFLINE`), and an inline key configuration form.
+  - **Context-Aware AI Assistants (Mission Control & TimeLens Copilot)**:
+    - **TimeLens Copilot Activation**: Added a dedicated, styled Copilot button in [TimeLensCompare.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/TimeLensCompare.jsx) toolbar; fixed missing toggle trigger; upgraded side-drawer to a spacious, responsive glassmorphic panel (`w-80 sm:w-96`).
+    - **Contextual Memory & Synchronization**: Re-engineered [AssistantChat.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/AssistantChat.jsx) to receive live structured mission and temporal context (`location`, `coordinates`, `years`, `activeTab`, `report`, `directive`).
+    - **Zero-Crash Multi-Provider Backend**: Overhauled `/api/chat` in [api/server.py](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/api/server.py) with prioritized routing: Groq `llama-3.3-70b-versatile` -> Google Gemini `gemini-3.5-flash-lite` dual-key rotation -> local Ollama -> deterministic telemetry synthesis.
+    - **Auto-Key Detection**: Automatic inline Groq key recognition in chat: pasting a `gsk_...` key immediately saves it to `.env`, re-arms the active pool, and switches to high-speed Llama 3.3 inference.
+    - **Interactive Quick Inquiries**: Added context-aware suggestion chips in the chat UI for instant 1-tap inquiries (e.g. land change analysis, spectral index interpretation, flood risk evaluation).
+  - **Design System & Typography Overhaul**:
+  - **Embedded Satellite Imagery in Reports**:
+    - Resolved real 10m Sentinel-2 / Landsat optical satellite imagery into [ScientificReport.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/ScientificReport.jsx) `ImageryCard` components (fixed hardcoded `imgUrl={null}`).
+    - Added dynamic fallback resolver via `/api/timelens/imagery` to ensure satellite visual evidence renders reliably for any mission AOI and temporal baseline (`thumb_before`, `thumb_after`, `primary_url`).
+    - Added full-resolution external link inspection, direct save buttons on cards, and a dedicated "Direct Satellite Asset Downloads" toolbar (Baseline PNG, Observation PNG, GeoTIFF).
+    - Fortified [api/server.py](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/api/server.py) (`_run_crew`) and [utils/report_builder.py](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/utils/report_builder.py) to automatically attach and render satellite imagery in saved session JSONs, markdown reports, and exported HTML intelligence reports.
+  - **Map & Analyzer Direct Satellite Download**:
+    - Integrated direct 1-click satellite asset download into [MapLayersView.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/views/MapLayersView.jsx).
+    - Integrated `ViewportTracker` to track active viewport bounds when users zoom into any region globally.
+    - Added a prominent "DOWNLOAD SATELLITE IMAGE" action in the AOI panel and a persistent "EXPORT SATELLITE" button in the top tools bar.
+    - Added a comprehensive Satellite Image Downloader modal supporting High-Res PNG (10m optical), GeoTIFF (.tif GIS-ready with EPSG:4326 georeferencing), and RFC 7946 GeoJSON vector polygons.
+    - Fortified `/api/timelens/download/file` in [api/server.py](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/api/server.py) with in-memory `rasterio` affine transformation to generate authentic georeferenced GeoTIFFs compatible with QGIS, ArcGIS, and GDAL.
+    - Migrated to an authoritative 4-font hierarchy: *Plus Jakarta Sans* (geometric headings), *Inter* (body/controls), *JetBrains Mono* (telemetry & data), and *Source Serif 4* (publication report narratives).
+    - Overhauled design tokens in `index.css`: standardized button shapes (`rounded-lg`), card surfaces (`rounded-xl`), uniform shadows, crisp border outlines (`#27272A`), and refined theme variables with cohesive matte Amber-600 accents.
+    - Polished `ScientificReport.jsx` to publication-grade aesthetics with serif narrative blocks, clean section dividers, structured KPI cards, and refined badge indicators.
+    - Re-arranged button hierarchies across Mission Control, TimeLens, and Right Console with uniform shapes, states, and color fillers.
+    - Production build verified: 0 compilation errors across 2,313 modules.
+  - **3D Globe Hologram & Satellite Deployment Restoration**:
+    - Restored holographic country polygon hover & elevation (`polygonAltitude` 0.01 → 0.07 on hover, 0.08 on select) with amber cap and side glows in [GlobeBackground.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/GlobeBackground.jsx).
+    - Re-enabled interactive country click triggering 3D deployed satellite constellations with illuminated orbit arcs, tracking coordinates, altitude labels, and a dedicated HUD fleet drawer.
+    - Restored live NASA EONET natural event markings with clean, discrete solid pin dots, spatial grid deduplication (preventing cluster overlapping), zero glow/blur, and interactive click-to-analyze tooltips.
+    - Cached country boundaries locally in `geolens-ui/public/data/countries.geojson` for instantaneous zero-latency rendering.
+  - **TopBar Interactive Omnibar & Target Navigator**:
+    - Replaced the static status pills with a functional, interactive **Global Target Search & Mission Omnibar** in [TopBar.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/TopBar.jsx).
+    - Integrated instant location jump (`Ctrl+K` / `Cmd+K`) with sub-millisecond debounced autocomplete; selecting any location smoothly flies the 3D globe camera and syncs coordinates.
+    - Context-aware mission status: displays live animated pipeline execution indicators during runs and a 1-click **Report Ready** button to view completed intelligence assessments.
+  - **Comprehensive UX, Accessibility & Mobile Overhaul**:
+    - **Color Contrast Hardening**: Upgraded `--color-mc-muted` to `#A1A1AA` (Zinc-400) and `--color-mc-secondary` to `#A3A3A3` in dark mode (8.4:1 - 8.6:1 contrast ratio); upgraded light theme muted colors to Zinc-600 (`#52525B`, 7.0:1 ratio); hardened metadata and table typography in [ScientificReport.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/ScientificReport.jsx) for complete WCAG AA/AAA compliance.
+    - **Custom Vector Favicon Suite**: Created high-resolution geospatial vector favicon [public/favicon.svg](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/public/favicon.svg) featuring NASA-grade Earth sphere, tilted satellite orbit trajectory, optical crosshair reticle, and emerald beacon; linked with Apple touch icons and theme color in `index.html`.
+    - **Adaptive Click-to-Fly Navigation**: Implemented [cameraFly.js](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/utils/cameraFly.js) to compute optimal 3D globe altitude (0.14 - 1.95) and 2D map zoom (4 - 15) from place categories, bounding boxes, and OSM metadata; selecting search results smoothly glides the 3D camera and synchronizes coordinates across Mission Console, HUD, and TimeLens.
+    - **Tactical 404 Error Page & Error Boundary**: Implemented [NotFound.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/pages/NotFound.jsx) ("404 · ORBITAL TELEMETRY LOST") with radar reticle graphics and quick jumps; wrapped application in [ErrorBoundary.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/ErrorBoundary.jsx) for bulletproof runtime recovery.
+    - **Broken Link & Route Remediation**: Registered routes for all platform sub-views (`/map-explorer`, `/map`, `/timelens`, `/workspace`, `/reports`, `/satellite-data`, `/gov-papers`); fixed unimported `Satellite` icon in [SatelliteData.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/pages/SatelliteData.jsx); verified all external research links.
+    - **Full Mobile & Touch Compatibility**: Added touch event listeners (`onTouchStart`, `onTouchMove`, `onTouchEnd`) and collapsible folding to the draggable dock in [LeftNav.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/LeftNav.jsx); built a mobile search modal sheet in [TopBar.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/TopBar.jsx); adapted [TimeLensCompare.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/TimeLensCompare.jsx) dual split views for responsive column-to-row stacking; fortified tap targets with `min-h-[42px]` in [BottomCommand.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/BottomCommand.jsx).
+  - **Movable & Collapsible TimeLens Telemetry HUD (Zero-Collision)**:
+    - **Collision Elimination**: Resolved overlapping HUD badges (`LOCKSTEP SYNC` colliding directly with `Δ Water / Δ NDVI / Cloud` pills) by removing the redundant split-view badge and unifying all operational telemetry into a single cohesive floating capsule in [TimeLensCompare.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/TimeLensCompare.jsx).
+    - **Draggable Repositioning**: Added mouse and touch drag handles (`GripVertical`) with screen boundary clamping, allowing users to move the HUD anywhere on the canvas so it never obstructs underlying satellite imagery.
+    - **Position Persistence**: Position coordinates persist in `sessionStorage` (`geolens_timelens_hud_pos`) across tab switches and refreshes.
+    - **Collapsible & Dismissible**: Added a minimize toggle (`Minus`) for compact mode (`ΔW | ΔN`) and a dismiss button (`✕`) with an instant 1-click `SHOW HUD` restore trigger in the sub-navigation toolbar.
+  - **Scientific Multi-Temporal Change Detection & Optical Cloud Masking**:
+    - **True Ground Anomaly Verification**: Updated [api/server.py](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/api/server.py) and [TimeLensCompare.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/TimeLensCompare.jsx) to calculate and display independent cloud cover percentages for baseline and comparison years (`T1` and `T2`), confirming Sentinel-2 QA60 / SCL cloud masking so users know spectral drops are true ground changes, not cloud shadows.
+    - **Deterministic Telemetry**: GEE satellite telemetry pipeline computes real NDVI, NDWI, and water surface area deltas.
+  - **NASA EONET Realtime Event Crisis Console (Fast Search & 1-Click Reports)**:
+    - **Interactive Disaster Feed**: Overhauled the EONET interface in [GlobeBackground.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/GlobeBackground.jsx) with debounced text search, category filtering (`Wildfires`, `Storms`, `Floods`, `Volcanoes`), and smooth click-to-fly camera focusing.
+    - **1-Click Accessible Reports & TimeLens**: Added instant `1-CLICK REPORT` (initiates 5-agent mission pipeline) and `TIMELENS` (opens comparison mode with coordinates pre-loaded) buttons both on marker click and inside the crisis drawer.
+  - **GIS Export Capabilities (GeoTIFF & RFC 7946 GeoJSON)**:
+    - **Direct GIS Ingestion**: Added Vector GeoJSON boundary export (`format=geojson`) streaming RFC 7946 FeatureCollections with polygon coordinates, area in km², and temporal metadata ready for QGIS, ArcGIS, and GeoPandas; added Baseline and Comparison multi-band GeoTIFF downloads in [api/server.py](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/api/server.py) and [TimeLensCompare.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/TimeLensCompare.jsx).
+  - **Executive Verdict & Strategic Takeaway Card**:
+    - **Leadership Briefing**: Added a prominent Executive Verdict banner at the very top of [ScientificReport.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/components/ScientificReport.jsx) featuring territorial risk ratings (`HIGH`, `MEDIUM`, `MONITORING`), natural-language strategic takeaways, and core metric highlights for non-GIS stakeholders.
+  - **Quick Start Onboarding Guide**:
+    - **Dismissible Guide Banner**: Added a sleek glassmorphic banner in [App.jsx](file:///c:/Users/HP/OneDrive/Desktop/autonomous_gis/geolens-ui/src/App.jsx) with keyboard shortcut tips (`Ctrl+K`), direct globe disaster interaction guidance, and clean persistent dismissal in `localStorage`.
+
+
+

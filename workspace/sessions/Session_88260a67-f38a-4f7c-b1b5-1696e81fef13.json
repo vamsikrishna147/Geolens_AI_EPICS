@@ -1,0 +1,192 @@
+{
+  "analysis_plan": {
+    "query_summary": "Analyze high-resolution satellite imagery for Ratnagiri",
+    "location": "Ratnagiri district, Maharashtra, India (Coordinates: 16.5\u00b0 N to 16.9\u00b0 N, 73.5\u00b0 E to 74.0\u00b0 E)",
+    "time_period": "Current",
+    "analysis_types": [],
+    "data_requirements": [
+      "High-resolution satellite imagery"
+    ],
+    "expected_outputs": [
+      "Maps",
+      "Reports"
+    ],
+    "priority_notes": ""
+  },
+  "data_acquisition": {
+    "recommended_datasets": [
+      {
+        "name": "Sentinel-2 MSI (Multi-Spectral Instrument)",
+        "provider": "ESA (European Space Agency)",
+        "access_method": "Google Earth Engine",
+        "why_recommended": "10m spatial resolution with 12 spectral bands for detailed land cover analysis",
+        "spatial_resolution": "10m",
+        "temporal_range": "2015-present"
+      },
+      {
+        "name": "Landsat 8 OLI/TIRS",
+        "provider": "USGS Earth Explorer",
+        "access_method": "Google Earth Engine",
+        "why_recommended": "30m resolution with thermal infrared bands for surface temperature analysis",
+        "spatial_resolution": "30m",
+        "temporal_range": "2013-present"
+      },
+      {
+        "name": "GADM Administrative Boundaries",
+        "provider": "Global Administrative Areas Database",
+        "access_method": "Administrative Boundary Tool",
+        "why_recommended": "Official district boundaries for Ratnagiri district (admin_level=2)",
+        "spatial_resolution": "1:1M scale",
+        "temporal_range": "2020"
+      }
+    ],
+    "acquired_data": [
+      {
+        "dataset_name": "Sentinel-2_SR_20231001_20231031_Ratnagiri",
+        "file_path": "/gcp/projects/geolens-storage/satellite/sentinel2/Ratnagiri_2023-10_composite.tif",
+        "metadata": {
+          "resolution": "10m",
+          "bands": [
+            "B2",
+            "B3",
+            "B4",
+            "B8",
+            "B11",
+            "B12"
+          ],
+          "date_range": "2023-10-01 to 2023-10-31",
+          "cloud_cover": "12%"
+        }
+      },
+      {
+        "dataset_name": "Landsat8_OLI_202309_Ratnagiri",
+        "file_path": "/gcp/projects/geolens-storage/satellite/landsat8/Ratnagiri_2023-09.tif",
+        "metadata": {
+          "resolution": "30m",
+          "bands": [
+            "Blue",
+            "Green",
+            "Red",
+            "NIR",
+            "SWIR1",
+            "SWIR2",
+            "QA"
+          ],
+          "date_range": "2023-09-15",
+          "cloud_cover": "8%"
+        }
+      },
+      {
+        "dataset_name": "GADM_Ratnagiri_District_Boundaries",
+        "file_path": "/gcp/projects/geolens-storage/vector/gadm/Ratnagiri_district_boundaries.geojson",
+        "metadata": {
+          "format": "GeoJSON",
+          "geometry_type": "Polygon",
+          "crs": "EPSG:4326",
+          "feature_count": "1 district boundary"
+        }
+      }
+    ],
+    "failed_acquisitions": [],
+    "storage_summary": "Data stored in GCP bucket 'geolens-storage' under satellite/ and vector/ directories with standardized naming",
+    "next_steps": "Proceed with image preprocessing (cloud masking, atmospheric correction) and boundary-based ROI analysis using GIS software"
+  },
+  "gis_processing": {
+    "operations_performed": [
+      "AOI Clipping: Clipped Sentinel-2 composite imagery to Ratnagiri district vector boundary",
+      "Spectral Index Computation: Calculated NDVI and NDWI bands from Sentinel-2 10m bands",
+      "Vector Reprojection: Reprojected boundary layers to EPSG:4326 target coordinate reference system",
+      "Buffer Zone Generation: Computed a 5km perimeter buffer zone around Ratnagiri district boundary",
+      "Area Calculation: Computed polygon area in sq km for Ratnagiri district",
+      "Interactive Map Generation: Created Leaflet HTML web map displaying district boundaries, buffer zones, and AOI footprints"
+    ],
+    "output_files": [
+      "/gcp/projects/geolens-storage/processed/Sentinel2_Ratnagiri_clipped.tif",
+      "/gcp/projects/geolens-storage/processed/Sentinel2_Ratnagiri_NDVI.tif",
+      "/gcp/projects/geolens-storage/processed/Sentinel2_Ratnagiri_NDWI.tif",
+      "/gcp/projects/geolens-storage/processed/Ratnagiri_district_boundaries_reprojected.geojson",
+      "/gcp/projects/geolens-storage/processed/Ratnagiri_district_5km_buffer.geojson"
+    ],
+    "maps_generated": [
+      "/gcp/projects/geolens-storage/maps/Ratnagiri_District_Interactive_Map.html"
+    ],
+    "gis_summary": "Completed GIS preprocessing workflow on acquired datasets for Ratnagiri district (16.5\u00b0 N to 16.9\u00b0 N, 73.5\u00b0 E to 74.0\u00b0 E). Processed GADM district boundary vector data to generate a 5km spatial buffer and calculated total polygon surface area. Clipped 10m Sentinel-2 MSI satellite imagery composite (October 2023) and Landsat 8 OLI imagery (September 2023) to the district boundary. Computed spectral indices including Normalized Difference Vegetation Index (NDVI) and Normalized Difference Water Index (NDWI) for vegetation health and surface water monitoring. Generated an interactive web-ready Folium/Leaflet HTML map visualizing district boundaries, buffer zones, and dataset footprints for integration into the web dashboard."
+  },
+  "earth_observation": {
+    "baseline_year": "2018",
+    "comparison_year": "2023",
+    "change_summary": "Multi-temporal landscape change analysis of Ratnagiri district between 2018 and 2023 reveals stable vegetation indices combined with moderate built-up urban expansion. Normalized Difference Vegetation Index (NDVI) baseline mean of 0.2895 in 2018 increased to 0.3299 in 2023, representing an absolute delta of +0.0405 (+13.99%), indicating stable vegetation health across forest and agricultural landscapes. Built-up land cover expanded from 18.72 km\u00b2 in 2018 to 27.38 km\u00b2 in 2023, reflecting an addition of 8.66 km\u00b2 (+46.25% growth) of constructed environment. Enhanced Vegetation Index (EVI) across the district averages 0.1944, ranging from -0.0941 in water/coastal boundaries to 0.7884 in dense canopy zones.",
+    "detected_anomalies": [
+      "Accelerated urban expansion of 8.66 km\u00b2 (+46.25% increase in built-up environment) between 2018 and 2023 identified via Dynamic World LULC classification.",
+      "Localized spectral anomalies along coastal water boundaries with EVI values dropping to -0.0941."
+    ],
+    "event_summary": "Physical transformation in Ratnagiri district (16.5\u00b0 N to 16.9\u00b0 N, 73.5\u00b0 E to 74.0\u00b0 E) over the 2018\u20132023 period is characterized by moderate infrastructure growth alongside resilient, stable vegetation cover. Urban and built-up land expanded by 8.66 km\u00b2 (+46.25%), growing from 18.72 km\u00b2 in 2018 to 27.38 km\u00b2 in 2023. Regional canopy greenness experienced a slight net enhancement (+13.99% NDVI gain), demonstrating no widespread deforestation, wildfire damage, or flood-induced degradation during the observed timeframe. Overall ecological risk level is evaluated as LOW.",
+    "gee_interpretation": "Google Earth Engine multi-spectral and multi-temporal analysis utilizing Sentinel-2 MSI (COPERNICUS/S2_SR_HARMONIZED) and Dynamic World 10m LULC datasets establishes that Ratnagiri district maintains a healthy ecological baseline. Sentinel-2 NDVI temporal differencing (T1: 2018 vs T2: 2023) yielded mean values rising from 0.2895 to 0.3299, classifying regional vegetation change as STABLE with zero critical deforestation alerts. Dynamic World 10m land cover classification (Label 6: Built environment) measured an increase from 18.72 km\u00b2 in T1 to 27.38 km\u00b2 in T2, confirming MODERATE GROWTH in urban footprint. EVI analysis confirms mean vegetation vitality at 0.1944 with maximum canopy greenness reaching 0.7884.",
+    "confidence_score": "High"
+  },
+  "official_report": {
+    "report_id": "RATNAGIRI_2023_001",
+    "title": "Ratnagiri District Land Use Change Analysis (2018-2023)",
+    "classification": "CONFIDENTIAL",
+    "executive_summary": "Satellite analysis of Ratnagiri district (16.5\u00b0 N to 16.9\u00b0 N, 73.5\u00b0 E to 74.0\u00b0 E) reveals stable vegetation health with 13.99% NDVI improvement (2018-2023) alongside 46.25% urban expansion. Coastal water boundaries show localized spectral anomalies. Ecological risk remains LOW with no critical deforestation or degradation detected. Urban growth requires targeted infrastructure planning while preserving vegetation resilience.",
+    "confidence_score": 0.95,
+    "data_sources": [
+      {
+        "source_name": "Sentinel-2 MSI (COPERNICUS/S2_SR_HARMONIZED)",
+        "description": "10m resolution multispectral imagery for vegetation analysis"
+      },
+      {
+        "source_name": "Dynamic World 10m LULC",
+        "description": "Land Use Land Cover classification for urban expansion tracking"
+      }
+    ],
+    "time_lens": {
+      "start_date": "2018-01-01",
+      "end_date": "2023-12-31"
+    },
+    "analytics": {
+      "total_area_affected_km2": "27.38 km\u00b2",
+      "severity": "LOW",
+      "primary_impact": "Moderate urban expansion and localized coastal spectral anomalies"
+    },
+    "chart_data": [
+      {
+        "name": "NDVI Improvement (2018-2023)",
+        "value": 13.99
+      },
+      {
+        "name": "Built-up Area Growth",
+        "value": 46.25
+      },
+      {
+        "name": "EVI Range",
+        "value": 0.7884
+      }
+    ],
+    "composition_data": [
+      {
+        "name": "Vegetation (NDVI)",
+        "value": 0.3299,
+        "color": "#4CAF50"
+      },
+      {
+        "name": "Built-up Environment",
+        "value": 27.38,
+        "color": "#FF5722"
+      },
+      {
+        "name": "Coastal Water",
+        "value": -0.0941,
+        "color": "#2196F3"
+      }
+    ],
+    "table_data": [
+      {
+        "region": "Ratnagiri District",
+        "change_pct": "46.25% (Built-up Growth)",
+        "risk": "LOW"
+      }
+    ]
+  },
+  "raw_output": "{\"report_id\":\"RATNAGIRI_2023_001\",\"title\":\"Ratnagiri District Land Use Change Analysis (2018-2023)\",\"classification\":\"CONFIDENTIAL\",\"executive_summary\":\"Satellite analysis of Ratnagiri district (16.5\u00b0 N to 16.9\u00b0 N, 73.5\u00b0 E to 74.0\u00b0 E) reveals stable vegetation health with 13.99% NDVI improvement (2018-2023) alongside 46.25% urban expansion. Coastal water boundaries show localized spectral anomalies. Ecological risk remains LOW with no critical deforestation or degradation detected. Urban growth requires targeted infrastructure planning while preserving vegetation resilience.\",\"confidence_score\":0.95,\"data_sources\":[{\"source_name\":\"Sentinel-2 MSI (COPERNICUS/S2_SR_HARMONIZED)\",\"description\":\"10m resolution multispectral imagery for vegetation analysis\"},{\"source_name\":\"Dynamic World 10m LULC\",\"description\":\"Land Use Land Cover classification for urban expansion tracking\"}],\"time_lens\":{\"start_date\":\"2018-01-01\",\"end_date\":\"2023-12-31\"},\"analytics\":{\"total_area_affected_km2\":\"27.38 km\u00b2\",\"severity\":\"LOW\",\"primary_impact\":\"Moderate urban expansion and localized coastal spectral anomalies\"},\"chart_data\":[{\"name\":\"NDVI Improvement (2018-2023)\",\"value\":13.99},{\"name\":\"Built-up Area Growth\",\"value\":46.25},{\"name\":\"EVI Range\",\"value\":0.7884}],\"composition_data\":[{\"name\":\"Vegetation (NDVI)\",\"value\":0.3299,\"color\":\"#4CAF50\"},{\"name\":\"Built-up Environment\",\"value\":27.38,\"color\":\"#FF5722\"},{\"name\":\"Coastal Water\",\"value\":-0.0941,\"color\":\"#2196F3\"}],\"table_data\":[{\"region\":\"Ratnagiri District\",\"change_pct\":\"46.25% (Built-up Growth)\",\"risk\":\"LOW\"}]}"
+}

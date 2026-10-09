@@ -21,6 +21,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from storage.postgis_client import get_postgis_client
 from storage.mongo_client import get_mongo_client
+from storage.redis_client import get_redis_client
 
 load_dotenv()
 
@@ -35,6 +36,7 @@ class StorageManager:
         storage.save_metadata(data, result_type="weather_summary")
         path = storage.get_file_path("rasters", "sentinel2_ndvi.tif")
         storage.index_file(path, source="sentinel2", file_type="geotiff")
+        storage.cache_set("key", value, ttl=300)
     """
 
     def __init__(self, query_id: Optional[str] = None):
@@ -48,8 +50,21 @@ class StorageManager:
         self.query_id = query_id or f"q_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         self.db = get_postgis_client()
         self.mongo = get_mongo_client()
+        self.redis = get_redis_client()
         self.data_root = os.path.abspath(os.getenv("DATA_STORAGE_PATH", "./data"))
         self._ensure_data_dirs()
+
+    def cache_get(self, key: str):
+        """Retrieve cached value from Redis if available."""
+        return self.redis.get(key)
+
+    def cache_set(self, key: str, value, ttl: int = 3600) -> bool:
+        """Store value in Redis cache with TTL."""
+        return self.redis.set(key, value, ttl=ttl)
+
+    def cache_delete(self, key: str) -> bool:
+        """Delete key from Redis cache."""
+        return self.redis.delete(key)
 
     def _ensure_data_dirs(self) -> None:
         """Create all necessary data subdirectories."""
@@ -208,5 +223,18 @@ class StorageManager:
         status = []
         status.append("PostGIS connected" if self.db.is_connected else "File-only mode (PostGIS not connected)")
         status.append("MongoDB connected" if self.mongo.is_connected else "MongoDB not connected")
+        status.append("Redis connected" if self.redis.is_connected else "Redis not connected")
         status.append(f"Local data: {self.data_root}")
         return " | ".join(status)
+
+    def get_system_health(self) -> dict:
+        """Return comprehensive status and metrics for all storage backends."""
+        return {
+            "postgis": self.db.stats(),
+            "mongodb": self.mongo.stats(),
+            "redis": self.redis.stats(),
+            "local_storage": {
+                "root": self.data_root,
+                "exists": os.path.exists(self.data_root),
+            }
+        }

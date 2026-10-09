@@ -11,10 +11,19 @@ and avoid redundant API calls within a session.
 import json
 import os
 import time
+import logging
 from functools import lru_cache
 from typing import Optional
 
 import requests
+
+try:
+    from storage.redis_client import get_redis_client
+    _redis = get_redis_client()
+except Exception:
+    _redis = None
+
+logger = logging.getLogger("geolens.geocoder")
 
 # Respect Nominatim's usage policy: max 1 request/second
 _LAST_REQUEST_TIME = 0.0
@@ -52,7 +61,7 @@ def _rate_limit() -> None:
     _LAST_REQUEST_TIME = time.time()
 
 
-def geocode_location(location: str) -> Optional[dict]:
+def geocode_location(location: str, lang: str = "en") -> Optional[dict]:
     """
     Geocode a location name to coordinates and bounding box.
 
@@ -61,10 +70,11 @@ def geocode_location(location: str) -> Optional[dict]:
                   e.g. "Konaseema district, Andhra Pradesh, India"
                        "Amazon rainforest, Brazil"
                        "Hyderabad, India"
+        lang: Language code for result names (e.g. 'en', 'hi', 'te', 'ta', 'bn'). Default 'en'.
 
     Returns:
         Dictionary with keys:
-          - display_name: Full formatted name from Nominatim
+          - display_name: Full formatted name from Nominatim in requested language
           - lat: Latitude (center)
           - lon: Longitude (center)
           - bbox: [south, north, west, east] bounding box
@@ -78,14 +88,89 @@ def geocode_location(location: str) -> Optional[dict]:
     if not _geocode_cache:
         _load_cache()
 
+    lang_code = (lang or "en").lower().strip()
     # Check cache
-    cache_key = location.lower().strip()
+    cache_key = f"{location.lower().strip()}:{lang_code}"
+    legacy_key = f"{location.lower().strip()}" if lang_code == "en" else None
     if cache_key in _geocode_cache:
-        return _geocode_cache[cache_key]
+        val = _geocode_cache[cache_key]
+        if _redis and _redis.is_connected:
+            if not _redis.exists(f"geolens:geocode:{cache_key}"):
+                _redis.set(f"geolens:geocode:{cache_key}", val, ttl=604800)
+            if legacy_key and not _redis.exists(f"geolens:geocode:{legacy_key}"):
+                _redis.set(f"geolens:geocode:{legacy_key}", val, ttl=604800)
+        return val
 
-    # Call Nominatim API
+    # Check Redis cache
+    if _redis and _redis.is_connected:
+        cached_val = _redis.get(f"geolens:geocode:{cache_key}")
+        if not cached_val and legacy_key:
+            cached_val = _redis.get(f"geolens:geocode:{legacy_key}")
+        if cached_val:
+            _geocode_cache[cache_key] = cached_val
+            return cached_val
+
+    # 1. Try Photon first (instantaneous, multi-language support, no strict rate limit)
+    photon_lang = lang_code if lang_code in ["de", "fr", "it"] else "en"
+    try:
+        p_resp = requests.get(
+            "https://photon.komoot.io/api/",
+            params={"q": location, "limit": 1, "lang": photon_lang},
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) GeoLensAI/2.0"},
+            timeout=3.0,
+        )
+        if p_resp.status_code == 200:
+            p_data = p_resp.json()
+            features = p_data.get("features", [])
+            if features:
+                feat = features[0]
+                props = feat.get("properties", {})
+                coords = feat.get("geometry", {}).get("coordinates", [0, 0])
+                lon, lat = float(coords[0]), float(coords[1])
+                name = props.get("name", "")
+                city = props.get("city", "")
+                state = props.get("state", "")
+                country = props.get("country", "")
+                country_code = props.get("countrycode", "").upper()
+                
+                parts = [p for p in [name or city, state, country] if p]
+                display_name = ", ".join(parts) if parts else (name or location)
+                
+                extent = props.get("extent") # [minLon, maxLat, maxLon, minLat]
+                if extent and len(extent) == 4:
+                    min_lon, max_lat, max_lon, min_lat = float(extent[0]), float(extent[1]), float(extent[2]), float(extent[3])
+                    south, north = min(min_lat, max_lat), max(min_lat, max_lat)
+                    west, east = min(min_lon, max_lon), max(min_lon, max_lon)
+                else:
+                    south, north = lat - 0.1, lat + 0.1
+                    west, east = lon - 0.1, lon + 0.1
+
+                result = {
+                    "display_name": display_name,
+                    "lat": lat,
+                    "lon": lon,
+                    "bbox": [south, north, west, east],
+                    "bbox_str": f"{west},{south},{east},{north}",
+                    "bbox_ee": [west, south, east, north],
+                    "country": country_code,
+                    "type": props.get("type", "place"),
+                    "osm_type": props.get("osm_type", "unknown"),
+                }
+                _geocode_cache[cache_key] = result
+                _save_cache()
+                if _redis and _redis.is_connected:
+                    _redis.set(f"geolens:geocode:{cache_key}", result, ttl=604800)
+                    if legacy_key:
+                        _redis.set(f"geolens:geocode:{legacy_key}", result, ttl=604800)
+                logger.info("Geocoded '%s' (Photon) -> lat=%.4f, lon=%.4f", location, lat, lon)
+                return result
+    except Exception as p_err:
+        logger.debug("Photon lookup failed, falling back to Nominatim: %s", p_err)
+
+    # 2. Call Nominatim API as fallback
     _rate_limit()
     try:
+        accept_lang_val = f"{lang_code},en;q=0.8" if lang_code != "en" else "en"
         response = requests.get(
             "https://nominatim.openstreetmap.org/search",
             params={
@@ -93,10 +178,11 @@ def geocode_location(location: str) -> Optional[dict]:
                 "format": "json",
                 "addressdetails": 1,
                 "limit": 1,
+                "accept-language": accept_lang_val,
             },
             headers={
-                "User-Agent": "GeoLensAI/1.0 (autonomous geospatial research platform)",
-                "Accept-Language": "en",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) GeoLensAI/2.0",
+                "Accept-Language": accept_lang_val,
             },
             timeout=10,
         )
@@ -104,7 +190,7 @@ def geocode_location(location: str) -> Optional[dict]:
         results = response.json()
 
         if not results:
-            print(f"[Geocoder] No results found for: '{location}'")
+            logger.info("No geocoding results found for: '%s'", location)
             return None
 
         r = results[0]
@@ -131,15 +217,21 @@ def geocode_location(location: str) -> Optional[dict]:
             "osm_type": r.get("osm_type", "unknown"),
         }
 
-        # Save to cache
+        # Save to memory and disk cache
         _geocode_cache[cache_key] = result
         _save_cache()
 
-        print(f"[Geocoder] '{location}' -> lat={result['lat']:.4f}, lon={result['lon']:.4f}")
+        # Save to Redis cache (7 days TTL)
+        if _redis and _redis.is_connected:
+            _redis.set(f"geolens:geocode:{cache_key}", result, ttl=604800)
+            if legacy_key:
+                _redis.set(f"geolens:geocode:{legacy_key}", result, ttl=604800)
+
+        logger.info("Geocoded '%s' -> lat=%.4f, lon=%.4f", location, result['lat'], result['lon'])
         return result
 
     except requests.RequestException as e:
-        print(f"[Geocoder] Error geocoding '{location}': {e}")
+        logger.warning("Error geocoding '%s': %s", location, e)
         return None
 
 
@@ -196,7 +288,7 @@ def expand_bbox(bbox: list, factor: float = 0.1) -> list:
     ]
 
 
-def get_nearby_places(location: str) -> list[dict]:
+def get_nearby_places(location: str, lang: str = "en") -> list[dict]:
     """
     Find or generate recommended nearby places and zoom targets around a given location.
 
@@ -206,7 +298,7 @@ def get_nearby_places(location: str) -> list[dict]:
       - Macro regional view bounding box (wide area, e.g. zoom 8)
       - 4 to 6 nearby places / districts fetched via Nominatim or spatial offset
     """
-    geo = geocode_location(location)
+    geo = geocode_location(location, lang=lang)
     if not geo:
         return []
 
@@ -239,41 +331,52 @@ def get_nearby_places(location: str) -> list[dict]:
     })
 
     # 3. Fetch actual nearby places from Nominatim search around the lat,lon
+    # We use a viewbox around the target to find nearby cities/towns
     try:
         _rate_limit()
+        # Create a bounding box roughly +/- 1.0 degrees (~111km) around the target
+        south, north = lat - 1.0, lat + 1.0
+        west, east = lon - 1.0, lon + 1.0
+        
+        lang_code = (lang or "en").lower().strip()
+        accept_lang_val = f"{lang_code},en;q=0.8" if lang_code != "en" else "en"
         resp = requests.get(
             "https://nominatim.openstreetmap.org/search",
             params={
-                "q": f"places near {location}",
+                "q": "city",
+                "viewbox": f"{west},{north},{east},{south}",
+                "bounded": 1,
                 "format": "json",
-                "limit": 6,
+                "limit": 8,
+                "accept-language": accept_lang_val,
             },
-            headers={"User-Agent": "GeoLensAI/1.0", "Accept-Language": "en"},
+            headers={"User-Agent": "GeoLensAI/2.0", "Accept-Language": accept_lang_val},
             timeout=8
         )
         if resp.ok:
-            for item in resp.json()[:5]:
-                name = item.get("display_name", "").split(",")[0]
-                if name.lower() != location.lower():
+            for item in resp.json():
+                name = item.get("name", "") or item.get("display_name", "").split(",")[0]
+                # Avoid adding the EXACT same place if it matches the current location
+                if name.lower() not in location.lower() and location.lower() not in name.lower():
                     nearby_targets.append({
                         "name": name,
-                        "type": "NEARBY_DISTRICT",
+                        "type": item.get("type", "CITY").upper(),
                         "lat": float(item["lat"]),
                         "lon": float(item["lon"]),
-                        "zoom": 12,
+                        "zoom": 11,
                         "description": item.get("display_name", ""),
                         "bbox": [float(b) for b in item.get("boundingbox", [lat-0.05, lat+0.05, lon-0.05, lon+0.05])]
                     })
-    except Exception:
-        pass
+                    if len(nearby_targets) >= 6:  # limit to 4 actual nearby places (+2 views = 6 total)
+                        break
+    except Exception as e:
+        logger.warning("Failed to fetch nearby places: %s", e)
 
-    # Fallback offset targets if Nominatim nearby yields few results
-    if len(nearby_targets) < 4:
+    # Fallback offset targets ONLY if we found absolutely nothing from the real API
+    if len(nearby_targets) < 3:
         offsets = [
-            ("North Sector", 0.1, 0.0),
-            ("South Sector", -0.1, 0.0),
-            ("East Sector", 0.0, 0.1),
-            ("West Sector", 0.0, -0.1),
+            ("North Sector", 0.05, 0.0),
+            ("South Sector", -0.05, 0.0),
         ]
         for label, dlat, dlon in offsets:
             nearby_targets.append({
@@ -287,6 +390,143 @@ def get_nearby_places(location: str) -> list[dict]:
             })
 
     return nearby_targets
+
+
+def get_location_suggestions(query: str, limit: int = 6, lang: str = "en") -> list[dict]:
+    """
+    Fast keystroke-by-keystroke location autocomplete suggestions using Photon & Nominatim.
+    Returns results in user-defined language (default: 'en'), avoiding untranslated native scripts.
+    Accelerated with Redis cache for sub-millisecond response on repeat keystrokes.
+    """
+    if not query or len(query.strip()) < 2:
+        return []
+    
+    q = query.strip()
+    lang_code = (lang or "en").lower().strip()
+    cache_key = f"geolens:suggest:{q.lower()}:{limit}:{lang_code}"
+    legacy_key = f"geolens:suggest:{q.lower()}:{limit}" if lang_code == "en" else None
+    if _redis and _redis.is_connected:
+        cached_res = _redis.get(cache_key)
+        if cached_res is None and legacy_key:
+            cached_res = _redis.get(legacy_key)
+        if cached_res is not None:
+            if legacy_key and not _redis.exists(legacy_key):
+                _redis.set(legacy_key, cached_res, ttl=86400)
+            return cached_res
+
+    seen = set()
+    suggestions = []
+
+    # Photon supports 'en', 'de', 'fr', 'it'. If lang_code is not one of these, default to 'en'
+    photon_lang = lang_code if lang_code in ["de", "fr", "it"] else "en"
+
+    # 1. Try Photon (ultra-low latency OSM geocoder)
+    try:
+        resp = requests.get(
+            "https://photon.komoot.io/api/",
+            params={"q": q, "limit": limit, "lang": photon_lang},
+            headers={"User-Agent": "GeoLensAI/2.0"},
+            timeout=2.5
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            for feature in data.get("features", []):
+                props = feature.get("properties", {})
+                coords = feature.get("geometry", {}).get("coordinates", [0, 0])
+                name = props.get("name", "")
+                city = props.get("city", "")
+                state = props.get("state", "")
+                country = props.get("country", "")
+                
+                parts = [p for p in [name or city, state, country] if p]
+                display_name = ", ".join(parts) if parts else name
+                place_type = props.get("osm_value") or props.get("type") or ""
+                extent = props.get("extent") # [minLon, maxLat, maxLon, minLat]
+                
+                if display_name and display_name not in seen:
+                    seen.add(display_name)
+                    suggestions.append({
+                        "display_name": display_name,
+                        "short_name": name or city or display_name.split(",")[0],
+                        "state": state,
+                        "country": country,
+                        "type": place_type,
+                        "bbox": extent,
+                        "lat": float(coords[1]),
+                        "lon": float(coords[0])
+                    })
+            if suggestions:
+                if _redis and _redis.is_connected:
+                    _redis.set(cache_key, suggestions[:limit], ttl=86400)
+                    if legacy_key:
+                        _redis.set(legacy_key, suggestions[:limit], ttl=86400)
+                return suggestions[:limit]
+    except Exception:
+        pass
+
+    # 2. Fallback to Nominatim search with Accept-Language header
+    try:
+        _rate_limit()
+        accept_lang_val = f"{lang_code},en;q=0.8" if lang_code != "en" else "en"
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={
+                "q": q,
+                "format": "json",
+                "addressdetails": 1,
+                "limit": limit,
+                "accept-language": accept_lang_val
+            },
+            headers={"User-Agent": "GeoLensAI/2.0", "Accept-Language": accept_lang_val},
+            timeout=3.0
+        )
+        if resp.status_code == 200:
+            for item in resp.json():
+                disp = item.get("display_name", "")
+                place_type = item.get("type") or item.get("class") or ""
+                bbox = item.get("boundingbox") # [minLat, maxLat, minLon, maxLon]
+                if disp not in seen:
+                    seen.add(disp)
+                    suggestions.append({
+                        "display_name": disp,
+                        "short_name": item.get("name", "") or disp.split(",")[0],
+                        "state": item.get("address", {}).get("state", ""),
+                        "country": item.get("address", {}).get("country", ""),
+                        "type": place_type,
+                        "bbox": bbox,
+                        "lat": float(item.get("lat", 0)),
+                        "lon": float(item.get("lon", 0))
+                    })
+            if suggestions and _redis and _redis.is_connected:
+                _redis.set(cache_key, suggestions[:limit], ttl=86400)
+                if legacy_key:
+                    _redis.set(legacy_key, suggestions[:limit], ttl=86400)
+            return suggestions[:limit]
+    except Exception:
+        pass
+
+    return []
+
+
+def clear_geocode_cache() -> dict:
+    """Clear memory, file, and Redis geocode and suggestion caches."""
+    global _geocode_cache
+    _geocode_cache.clear()
+    if os.path.exists(_CACHE_FILE):
+        try:
+            with open(_CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump({}, f)
+        except Exception:
+            pass
+    redis_keys_cleared = 0
+    if _redis and _redis.is_connected:
+        redis_keys_cleared += _redis.flush_prefix("geolens:geocode:")
+        redis_keys_cleared += _redis.flush_prefix("geolens:suggest:")
+    return {
+        "status": "cleared",
+        "redis_keys_cleared": redis_keys_cleared,
+        "file_cleared": True,
+    }
 
 
 # Pre-load cache on module import

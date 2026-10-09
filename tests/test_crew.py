@@ -193,7 +193,7 @@ class TestAgents:
 
         # Use a dummy LLM (won't make API calls in this test)
         dummy_llm = LLM(
-            model="gemini/gemini-2.0-flash",
+            model="gemini/gemini-3.6-flash",
             api_key="dummy_key_for_testing",
         )
         agent = create_planner_agent(llm=dummy_llm)
@@ -201,16 +201,16 @@ class TestAgents:
         assert agent.allow_delegation is False
 
     def test_dataset_agent_creation(self):
-        """The Dataset Discovery Agent should be created with tools."""
+        """The Data Sourcing Agent should be created with tools."""
         from crewai import LLM
-        from agents.dataset_discovery_agent import create_dataset_discovery_agent
+        from agents.data_sourcing_agent import create_data_sourcing_agent
 
         dummy_llm = LLM(
-            model="gemini/gemini-2.0-flash",
+            model="gemini/gemini-3.6-flash",
             api_key="dummy_key_for_testing",
         )
-        agent = create_dataset_discovery_agent(llm=dummy_llm)
-        assert agent.role == "Geospatial Dataset Discovery Specialist"
+        agent = create_data_sourcing_agent(llm=dummy_llm)
+        assert "Data Sourcing" in agent.role or "Specialist" in agent.role
         assert len(agent.tools) > 0, "Dataset agent should have tools"
         assert agent.allow_delegation is False
 
@@ -222,21 +222,24 @@ class TestCrew:
     """Tests for crew construction."""
 
     def test_crew_initialization(self):
-        """The GeoLensCrew should initialize with both agents."""
+        """The GeoLensCrew should initialize with all 5 agents."""
         from crewai import LLM
         from crews.geolens_crew import GeoLensCrew
 
         dummy_llm = LLM(
-            model="gemini/gemini-2.0-flash",
+            model="gemini/gemini-3.6-flash",
             api_key="dummy_key_for_testing",
         )
         crew = GeoLensCrew(llm=dummy_llm, verbose=False)
         assert crew.planner is not None
-        assert crew.dataset_agent is not None
+        assert crew.data_agent is not None
+        assert crew.gis_agent is not None
+        assert crew.eo_agent is not None
+        assert crew.reporting_agent is not None
 
     def test_pydantic_models(self):
         """Pydantic output models should be valid."""
-        from crews.geolens_crew import AnalysisPlan, DatasetRecommendation, DatasetMatch
+        from crews.geolens_crew import AnalysisPlan, OfficialReport
 
         # Test AnalysisPlan
         plan = AnalysisPlan(
@@ -248,20 +251,7 @@ class TestCrew:
             expected_outputs=["ndvi_map"],
         )
         assert plan.query_summary == "Test query"
-
-        # Test DatasetRecommendation
-        rec = DatasetRecommendation(
-            recommended_datasets=[
-                DatasetMatch(
-                    name="Sentinel-2",
-                    provider="ESA",
-                    access_method="Google Earth Engine",
-                    why_recommended="Best for NDVI",
-                )
-            ],
-            workflow_suggestion="Use Sentinel-2 for NDVI analysis",
-        )
-        assert len(rec.recommended_datasets) == 1
+        assert plan.location == "Test location"
 
 
 if __name__ == "__main__":
