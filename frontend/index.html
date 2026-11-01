@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoLens AI | TACTICAL TERMINAL</title>
+    
+    <!-- Brutalist Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@400;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- 3D Globe dependencies -->
+    <script src="https://unpkg.com/three"></script>
+    <script src="https://unpkg.com/globe.gl"></script>
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+    <!-- Tactical Elements -->
+    <div class="crosshair" id="crosshair"></div>
+    <div class="coord-tracker" id="coordTracker">LAT: 00.0000 | LON: 00.0000</div>
+    <div id="globeViz"></div>
+
+    <main class="app-container">
+        
+        <!-- HEADER & TOP NAVIGATION -->
+        <header class="main-header">
+            <div style="display:flex; align-items:center;">
+                <div class="logo">
+                    <h1>GEOLENS_AI</h1>
+                </div>
+                <nav class="top-nav">
+                    <button class="nav-btn active" onclick="switchPage('homeSection')">DASHBOARD</button>
+                    <button class="nav-btn" onclick="switchPage('mapExplorerSection')">MAP EXPLORER</button>
+                    <button class="nav-btn" onclick="switchPage('timeLensSection')">TIMELENS</button>
+                    <button class="nav-btn" onclick="switchPage('reportsSection')">REPORTS</button>
+                    <button class="nav-btn" onclick="switchPage('satelliteDataSection')">SATELLITE DATA</button>
+                    <button class="nav-btn" onclick="switchPage('govPapersSection')">GOV & RESEARCH</button>
+                </nav>
+            </div>
+            <div class="telemetry-bar" style="border: none; background: transparent; padding: 0;">
+                <span class="tel-val warn">STATUS: ONLINE</span>
+                <span class="tel-val" style="margin-left:20px;">UPLINK: SECURE</span>
+            </div>
+        </header>
+
+        <!-- ============================================== -->
+        <!-- PAGE 1: MAIN DASHBOARD (HOME)                  -->
+        <!-- ============================================== -->
+        <div id="homeSection" class="page-section active">
+            <!-- LEFT SIDEBAR: HISTORY & TELEMETRY -->
+            <aside class="panel history-panel">
+                <div class="panel-header">
+                    <span><i class="fa-solid fa-clock-rotate-left"></i> HISTORY</span>
+                </div>
+                <ul class="history-list" id="historyList">
+                    <li class="history-item" onclick="setQuery('Analyze flooding in Konaseema district...')">ID: 0x9A4F - Konaseema Flood</li>
+                    <li class="history-item" onclick="setQuery('Show me deforestation in the Amazon...')">ID: 0x8B22 - Amazon Deforest</li>
+                    <li class="history-item" onclick="setQuery('What is the NDVI trend for agricultural land near Hyderabad?')">ID: 0x7C11 - Hyderabad NDVI</li>
+                </ul>
+                
+                <div class="panel-header" style="margin-top: 40px;">
+                    <span><i class="fa-solid fa-satellite-dish"></i> TELEMETRY</span>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:15px;">
+                    <div class="telemetry-module">
+                        <div class="telemetry-bar"><span>ELEVATION (DEM)</span> <span class="tel-val">NOMINAL</span></div>
+                        <div class="tel-visual"><div class="tel-fill" style="width: 45%; background: var(--laser-green);"></div></div>
+                    </div>
+                    <div class="telemetry-module">
+                        <div class="telemetry-bar"><span>RAINFALL (GPM)</span> <span class="tel-val warn">HIGH WARNING</span></div>
+                        <div class="tel-visual"><div class="tel-fill blink" style="width: 85%; background: var(--radar-orange);"></div></div>
+                    </div>
+                    <div class="telemetry-module">
+                        <div class="telemetry-bar"><span>FLOOD RISK (SAR)</span> <span class="tel-val warn">CRITICAL</span></div>
+                        <div class="tel-visual"><div class="tel-fill blink-fast" style="width: 95%; background: var(--radar-orange);"></div></div>
+                    </div>
+                    <div class="telemetry-module">
+                        <div class="telemetry-bar"><span>SOIL MOISTURE (SMAP)</span> <span class="tel-val">42%</span></div>
+                        <div class="tel-visual"><div class="tel-fill" style="width: 42%; background: var(--laser-green);"></div></div>
+                    </div>
+                    <div class="telemetry-module">
+                        <div class="telemetry-bar"><span>WILDFIRE INDEX</span> <span class="tel-val">LOW</span></div>
+                        <div class="tel-visual"><div class="tel-fill" style="width: 15%; background: var(--laser-green);"></div></div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- CENTER: MAIN DASHBOARD & QUICK ACTIONS -->
+            <section class="center-column">
+                <div style="display: flex; gap: 10px;">
+                    <form id="queryForm" class="panel query-box" style="flex: 1;">
+                        <div class="panel-header" style="border-bottom: none; margin: 0; padding: 0;">
+                            <span><i class="fa-solid fa-terminal"></i> COMMAND INPUT</span>
+                        </div>
+                        <textarea id="queryInput" placeholder="> Enter geospatial intelligence query here..." required></textarea>
+                        <button type="submit" class="brutal-btn" id="submitBtn">EXECUTE_DIRECTIVE</button>
+                    </form>
+                    
+                    <!-- QUICK ACTIONS -->
+                    <div class="panel" style="width: 250px; display: flex; flex-direction: column; gap: 10px;">
+                        <div class="panel-header" style="border-bottom: none; margin: 0; padding: 0;">
+                            <span><i class="fa-solid fa-bolt"></i> QUICK ACTIONS</span>
+                        </div>
+                        <button class="nav-btn" style="text-align:left;" onclick="setQuery('Deploy emergency flood scan using Sentinel-1 SAR')">[+] FLOOD SCAN</button>
+                        <button class="nav-btn" style="text-align:left;" onclick="setQuery('Calculate NDVI for agricultural anomaly detection')">[+] CHECK VEGETATION</button>
+                        <button class="nav-btn" style="text-align:left;" onclick="setQuery('Assess urban damage infrastructure using high-res imagery')">[+] URBAN DAMAGE</button>
+                        <button class="nav-btn" style="text-align:left;" onclick="alert('Telemetry Syncing...')">[+] SYNC TELEMETRY</button>
+                    </div>
+                </div>
+
+                <div class="pipeline" id="pipeline">
+                    <div class="step" id="step-planner"><i class="fa-solid fa-brain"></i> PLANNER</div>
+                    <div class="step" id="step-discovery"><i class="fa-solid fa-database"></i> DISCOVERY</div>
+                    <div class="step" id="step-acquisition"><i class="fa-solid fa-download"></i> ACQUISITION</div>
+                    <div class="step" id="step-gis"><i class="fa-solid fa-layer-group"></i> GIS_OPS</div>
+                    <div class="step" id="step-satellite"><i class="fa-solid fa-satellite"></i> ANALYSIS</div>
+                </div>
+
+                <div class="terminal" id="terminalOutput">
+                    <p>> SYSTEM INITIALIZED...</p>
+                    <p>> WAITING FOR DIRECTIVE...</p>
+                </div>
+
+                <div class="results-area hidden" id="resultsSection">
+                    <div class="panel map-container">
+                        <iframe id="mapFrame" src="about:blank"></iframe>
+                    </div>
+                    <div class="panel report-content" id="reportContent">
+                        <div class="panel-header"><span><i class="fa-solid fa-file-waveform"></i> INTEL_REPORT</span></div>
+                        <!-- Filled by JS -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- RIGHT SIDEBAR: CHATBOT -->
+            <aside class="panel chat-panel">
+                <div class="panel-header">
+                    <span><i class="fa-solid fa-robot"></i> ASSISTANT</span>
+                </div>
+                <div class="chat-messages" id="chatBox">
+                    <div class="msg ai">> How can I assist with your geospatial analysis today?</div>
+                </div>
+                <form id="chatForm" class="chat-input">
+                    <input type="text" id="chatInput" placeholder="> Query AI..." autocomplete="off">
+                    <button type="submit"><i class="fa-solid fa-paper-plane"></i></button>
+                </form>
+            </aside>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- PAGE 2: MAP EXPLORER                           -->
+        <!-- ============================================== -->
+        <div id="mapExplorerSection" class="page-section">
+            <div class="full-page">
+                <div class="panel map-container" style="min-height: 80vh;">
+                    <div class="panel-header"><span><i class="fa-solid fa-map-location-dot"></i> GLOBAL MAP EXPLORER</span></div>
+                    <div style="padding: 20px; color: var(--laser-green);">[MAP EXPLORER MODULE INITIALIZING... Full-screen Leaflet/Folium integration goes here]</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- PAGE 3: TIMELENS                               -->
+        <!-- ============================================== -->
+        <div id="timeLensSection" class="page-section">
+            <div class="full-page">
+                <div class="panel">
+                    <div class="panel-header"><span><i class="fa-solid fa-clock-rotate-left"></i> TIMELENS (TEMPORAL ANALYSIS)</span></div>
+                    <div style="padding: 20px; color: var(--radar-orange);">[TIMELENS MODULE INITIALIZING... Time-series change detection slider goes here]</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- PAGE 4: REPORTS                                -->
+        <!-- ============================================== -->
+        <div id="reportsSection" class="page-section">
+            <div class="full-page">
+                <div class="panel">
+                    <div class="panel-header"><span><i class="fa-solid fa-folder-open"></i> ARCHIVED INTELLIGENCE REPORTS</span></div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; padding: 20px;">
+                        <div class="panel" style="box-shadow: none;"><h4>0x9A4F - Konaseema Flood</h4><p>Confidence: HIGH</p><button class="nav-btn">VIEW</button></div>
+                        <div class="panel" style="box-shadow: none;"><h4>0x8B22 - Amazon Deforest</h4><p>Confidence: MED</p><button class="nav-btn">VIEW</button></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- PAGE 5: SATELLITE DATA (Fire/Flood/Elevation)  -->
+        <!-- ============================================== -->
+        <div id="satelliteDataSection" class="page-section">
+            <div class="full-page">
+                <div class="panel">
+                    <div class="panel-header"><span><i class="fa-solid fa-satellite"></i> RAW SATELLITE DATA ACCESS</span></div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; padding: 20px;">
+                        <div class="panel" style="box-shadow: none; border-color: var(--radar-orange);">
+                            <h4><i class="fa-solid fa-fire"></i> FIRE DATA (FIRMS)</h4>
+                            <p>Access real-time active fire anomaly data from MODIS and VIIRS.</p>
+                            <button class="nav-btn" style="margin-top:10px;">BROWSE DATA</button>
+                        </div>
+                        <div class="panel" style="box-shadow: none; border-color: var(--laser-green);">
+                            <h4><i class="fa-solid fa-water"></i> FLOOD DATA (SAR)</h4>
+                            <p>Access Sentinel-1 Synthetic Aperture Radar water extent masks.</p>
+                            <button class="nav-btn" style="margin-top:10px;">BROWSE DATA</button>
+                        </div>
+                        <div class="panel" style="box-shadow: none; border-color: #00b8ff;">
+                            <h4><i class="fa-solid fa-mountain"></i> ELEVATION (DEM)</h4>
+                            <p>Access Copernicus 30m Digital Elevation Models.</p>
+                            <button class="nav-btn" style="margin-top:10px;">BROWSE DATA</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- PAGE 6: GOV PAPERS & RESEARCH                  -->
+        <!-- ============================================== -->
+        <div id="govPapersSection" class="page-section">
+            <div class="full-page">
+                <div class="panel">
+                    <div class="panel-header"><span><i class="fa-solid fa-book-journal-whills"></i> OPEN SOURCE ACADEMIC & GOV DATA</span></div>
+                    <ul style="list-style: none; padding: 20px; display: flex; flex-direction: column; gap: 15px;">
+                        <li><a href="https://earthdata.nasa.gov/" target="_blank" style="color: var(--laser-green); text-decoration: none;">[EXTERNAL] NASA Earthdata Search ></a></li>
+                        <li><a href="https://bhuvan.nrsc.gov.in/" target="_blank" style="color: var(--laser-green); text-decoration: none;">[EXTERNAL] ISRO Bhuvan Geoportal ></a></li>
+                        <li><a href="https://scihub.copernicus.eu/" target="_blank" style="color: var(--laser-green); text-decoration: none;">[EXTERNAL] Copernicus Open Access Hub ></a></li>
+                        <li><a href="https://earthengine.google.com/" target="_blank" style="color: var(--laser-green); text-decoration: none;">[EXTERNAL] Google Earth Engine Data Catalog ></a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
