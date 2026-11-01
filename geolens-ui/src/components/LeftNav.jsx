@@ -27,8 +27,8 @@ function NavItem({ id, Icon, label, active, onClick }) {
 
       <Icon size={21} strokeWidth={active ? 2.2 : 1.7} />
 
-      {/* Tooltip */}
-      <span className="absolute left-14 bg-mc-panel border border-mc-border px-3 py-1.5 rounded-lg text-[11px] font-body font-medium text-mc-text opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-[9999] shadow-lg">
+      {/* Tooltip (Desktop hover only) */}
+      <span className="hidden md:block absolute left-14 bg-mc-panel border border-mc-border px-3 py-1.5 rounded-lg text-[11px] font-body font-medium text-mc-text opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-[9999] shadow-lg">
         {label}
       </span>
     </button>
@@ -45,15 +45,41 @@ export default function LeftNav({ activeTab, onTabChange }) {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-          return parsed;
+          const maxX = Math.max(10, (typeof window !== 'undefined' ? window.innerWidth : 800) - 65);
+          const maxY = Math.max(60, (typeof window !== 'undefined' ? window.innerHeight : 600) - 250);
+          return {
+            x: Math.max(10, Math.min(maxX, parsed.x)),
+            y: Math.max(60, Math.min(maxY, parsed.y)),
+          };
         }
       }
     } catch (_) {}
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      return { x: 12, y: 70 };
+    }
     return { x: 18, y: 150 };
   });
 
-  // Mobile collapsed state (allows user on small screens to fold the dock)
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  // Mobile collapsed state (collapses by default on mobile viewports < 768px to prevent content occlusion)
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    return typeof window !== 'undefined' && window.innerWidth < 768;
+  });
+
+  // Re-clamp position on window resize
+  useEffect(() => {
+    const handleResize = () => {
+      setPosition(prev => {
+        const maxX = Math.max(10, window.innerWidth - 65);
+        const maxY = Math.max(60, window.innerHeight - 250);
+        return {
+          x: Math.max(10, Math.min(maxX, prev.x)),
+          y: Math.max(60, Math.min(maxY, prev.y)),
+        };
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, initialX: 0, initialY: 0 });
@@ -139,20 +165,22 @@ export default function LeftNav({ activeTab, onTabChange }) {
       <nav
         className="glass-dock p-2 flex flex-col gap-1.5 h-fit shadow-[0_8px_32px_rgba(0,0,0,0.5)] border border-mc-border rounded-2xl transition-all"
         aria-label="Main navigation widget"
+        data-tour="nav-dock"
       >
         {/* Drag & Collapse Handle */}
         <div
           onMouseDown={handleMouseDown}
           onTouchStart={handleTouchStart}
+          onClick={() => { if (isCollapsed) setIsCollapsed(false); }}
           onDoubleClick={() => setIsCollapsed(c => !c)}
-          className="flex items-center justify-between px-1 py-1 cursor-grab active:cursor-grabbing text-mc-muted hover:text-mc-primary transition-colors group"
-          title="Drag dock or double tap to collapse"
+          className={`flex items-center justify-between px-1 py-1 cursor-grab active:cursor-grabbing text-mc-muted hover:text-mc-primary transition-colors group ${isCollapsed ? 'gap-1.5' : ''}`}
+          title={isCollapsed ? "Tap to expand navigation dock" : "Drag dock or double click to collapse"}
         >
           <GripVertical size={14} className="opacity-50 group-hover:opacity-100" />
           <button 
             type="button"
             onClick={(e) => { e.stopPropagation(); setIsCollapsed(c => !c); }}
-            className="sm:hidden text-[9px] font-mono text-mc-muted hover:text-white px-1"
+            className="text-[10px] font-mono text-mc-primary hover:text-white px-1 cursor-pointer font-bold"
             title={isCollapsed ? 'Expand dock' : 'Collapse dock'}
           >
             {isCollapsed ? '+' : '−'}
@@ -170,7 +198,12 @@ export default function LeftNav({ activeTab, onTabChange }) {
                 Icon={Icon}
                 label={t(label)}
                 active={activeTab === id}
-                onClick={() => onTabChange(id)}
+                onClick={() => {
+                  onTabChange(id);
+                  if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                    setIsCollapsed(true);
+                  }
+                }}
               />
             ))}
           </>

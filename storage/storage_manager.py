@@ -238,3 +238,7 @@ class StorageManager:
                 "exists": os.path.exists(self.data_root),
             }
         }
+
+    def health_check(self) -> dict:
+        """Convenience alias for get_system_health."""
+        return self.get_system_health()

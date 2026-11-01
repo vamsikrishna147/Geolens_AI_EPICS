@@ -275,9 +275,9 @@ function FloodPanel({ location }) {
         <button
           type="button"
           onClick={() => { setFloodStart('2024-08-01'); setFloodEnd('2024-08-31'); setBaseYear(2022); }}
-          className="text-[10px] text-mc-primary hover:underline flex items-center gap-1 cursor-pointer"
+          className="text-[10px] text-mc-primary hover:underline font-mono cursor-pointer"
         >
-          ⚡ Load 2024 Flood
+          Load 2024 Flood Baseline
         </button>
       </div>
 
@@ -373,9 +373,9 @@ function WildfirePanel({ location }) {
         <button
           type="button"
           onClick={() => { setPreFireStart('2018-09-01'); setPreFireEnd('2018-10-15'); setFireStart('2018-11-08'); setFireEnd('2018-11-25'); }}
-          className="text-[10px] text-orange-400 hover:underline flex items-center gap-1 cursor-pointer"
+          className="text-[10px] text-orange-400 hover:underline font-mono cursor-pointer"
         >
-          ⚡ Load Camp Fire 2018
+          Load Camp Fire Baseline
         </button>
       </div>
 
@@ -450,7 +450,7 @@ export default function TimeLensCompare({ onClose }) {
 
   const [searchQuery, setSearchQuery]     = useState(defaultLoc);
   const [yearBefore, setYearBefore]       = useState(savedContext.yearBefore || '2024');
-  const [yearAfter,  setYearAfter]        = useState(savedContext.yearAfter || '2025');
+  const [yearAfter,  setYearAfter]        = useState(savedContext.yearAfter || '2026');
 
   const [imgBefore, setImgBefore]           = useState(savedContext.imgBefore || null);
   const [imgAfter,  setImgAfter]            = useState(savedContext.imgAfter || null);
@@ -478,28 +478,6 @@ export default function TimeLensCompare({ onClose }) {
       sessionStorage.setItem('geolens_timelens_active_context', JSON.stringify(stateToSave));
     } catch (_) {}
   }, [searchQuery, resolvedLocation, yearBefore, yearAfter, imgBefore, imgAfter, mapCenter, mapZoom, activeTab]);
-
-  // Synchronize target coordinates and zoom when location is selected from Omnibar or mission console
-  useEffect(() => {
-    const handleTargetSelected = (e) => {
-      const detail = e.detail;
-      if (!detail) return;
-      const { name, displayName, lat, lon, zoom } = detail;
-      if (typeof lat === 'number' && typeof lon === 'number') {
-        setMapCenter([lat, lon]);
-        if (typeof zoom === 'number') {
-          setMapZoom(zoom);
-        }
-        const resolved = displayName || name || '';
-        if (resolved) {
-          setSearchQuery(name || resolved);
-          setResolvedLocation(resolved);
-        }
-      }
-    };
-    window.addEventListener('target-location-selected', handleTargetSelected);
-    return () => window.removeEventListener('target-location-selected', handleTargetSelected);
-  }, []);
 
   // Drawing & Area Selection
   const [isDrawing, setIsDrawing] = useState(false);
@@ -533,7 +511,9 @@ export default function TimeLensCompare({ onClose }) {
   // ── Feature 2: Draggable Telemetry HUD ───────────────────────────────────────
   const [liveMetrics, setLiveMetrics] = useState(null);
   const [showMetrics, setShowMetrics] = useState(true);
-  const [hudCollapsed, setHudCollapsed] = useState(false);
+  const [hudCollapsed, setHudCollapsed] = useState(() => {
+    return typeof window !== 'undefined' && window.innerWidth < 768;
+  });
   const [hudPos, setHudPos] = useState(() => {
     try {
       const saved = sessionStorage.getItem('geolens_timelens_hud_pos');
@@ -542,7 +522,7 @@ export default function TimeLensCompare({ onClose }) {
         if (typeof p.x === 'number' && typeof p.y === 'number') return p;
       }
     } catch (_) {}
-    return { x: null, y: 16 };
+    return { x: null, y: (typeof window !== 'undefined' && window.innerWidth < 768) ? 52 : 16 };
   });
 
   const hudDraggingRef = useRef(false);
@@ -720,36 +700,60 @@ export default function TimeLensCompare({ onClose }) {
   };
 
   // Primary execution: geocodes location, smoothly flies both windows, and retrieves satellite composites
-  const handleExecuteSearch = async (overrideQuery = null) => {
+  const handleExecuteSearch = async (overrideQuery = null, overrideCoords = null, overrideYears = null) => {
     const loc = overrideQuery !== null ? overrideQuery : searchQuery;
     if (!loc || !loc.trim()) return;
     setIsFetchingImages(true);
 
+    const effectiveYearBefore = overrideYears?.yearBefore || yearBefore;
+    const effectiveYearAfter  = overrideYears?.yearAfter || yearAfter;
+
     try {
-      // 1. Geocode location immediately to re-center both windows
-      const geoRes = await fetch(`${API}/api/geocoder/search?q=${encodeURIComponent(loc)}&lang=${encodeURIComponent(language || 'en')}`);
-      const geoData = await geoRes.json();
-      if (geoRes.ok && geoData.lat && geoData.lon) {
-        setMapCenter([geoData.lat, geoData.lon]);
+      // 1. If explicit coordinates are provided, prioritize them immediately
+      if (overrideCoords && Array.isArray(overrideCoords) && overrideCoords.length === 2 && typeof overrideCoords[0] === 'number') {
+        const [cLat, cLng] = overrideCoords;
+        setMapCenter([cLat, cLng]);
         setMapZoom(12);
-        setResolvedLocation(geoData.display_name || loc);
+        if (overrideQuery) {
+          setSearchQuery(overrideQuery);
+          setResolvedLocation(`${overrideQuery} (${cLat.toFixed(4)}°, ${cLng.toFixed(4)}°)`);
+        }
+      } else {
+        // Geocode location via geocoder API to re-center both windows
+        try {
+          const geoRes = await fetch(`${API}/api/geocoder/search?q=${encodeURIComponent(loc)}&lang=${encodeURIComponent(language || 'en')}`);
+          const geoData = await geoRes.json();
+          if (geoRes.ok && geoData.lat && geoData.lon) {
+            setMapCenter([geoData.lat, geoData.lon]);
+            setMapZoom(12);
+            setResolvedLocation(geoData.display_name || loc);
+          }
+        } catch (_) {}
       }
 
-      // 2. Fetch satellite telemetry for both years from Earth Engine
-      const bboxParam = bounds ? `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}` : '';
-      const res = await fetch(`${API}/api/timelens/imagery?location=${encodeURIComponent(loc)}&yearBefore=${yearBefore}&yearAfter=${yearAfter}${bboxParam ? `&bbox=${bboxParam}` : ''}`);
+      // 2. Compute bounding box: if bounds are drawn, use them. If explicit coordinates exist, compute ~15km AOI window.
+      let bboxParam = '';
+      if (bounds) {
+        bboxParam = `${bounds.getWest().toFixed(4)},${bounds.getSouth().toFixed(4)},${bounds.getEast().toFixed(4)},${bounds.getNorth().toFixed(4)}`;
+      } else if (overrideCoords && Array.isArray(overrideCoords) && overrideCoords.length === 2) {
+        const [cLat, cLng] = overrideCoords;
+        bboxParam = `${(cLng - 0.08).toFixed(4)},${(cLat - 0.08).toFixed(4)},${(cLng + 0.08).toFixed(4)},${(cLat + 0.08).toFixed(4)}`;
+      }
+
+      // 3. Fetch satellite telemetry for both years from Earth Engine
+      const res = await fetch(`${API}/api/timelens/imagery?location=${encodeURIComponent(loc)}&yearBefore=${effectiveYearBefore}&yearAfter=${effectiveYearAfter}${bboxParam ? `&bbox=${bboxParam}` : ''}`);
       const data = await res.json();
       if (res.ok) {
         if (data.url_before) setImgBefore(data.url_before);
         if (data.url_after)  setImgAfter(data.url_after);
         if (data.location)   setResolvedLocation(data.location);
-        if (data.bounds && data.bounds.length === 4) {
+        if (data.bounds && data.bounds.length === 4 && !overrideCoords) {
           const [minLng, minLat, maxLng, maxLat] = data.bounds;
           setMapCenter([(minLat + maxLat) / 2, (minLng + maxLng) / 2]);
           setMapZoom(12);
         }
         // Save successful query to mission history
-        saveMissionToHistory(loc, yearBefore, yearAfter);
+        saveMissionToHistory(loc, effectiveYearBefore, effectiveYearAfter);
         // Generate live metric pills from satellite response with scientific fidelity
         const ndviBefore = typeof data.ndvi_before === 'number' ? data.ndvi_before : 0.42;
         const ndviAfter  = typeof data.ndvi_after === 'number'  ? data.ndvi_after  : 0.38;
@@ -775,9 +779,64 @@ export default function TimeLensCompare({ onClose }) {
     }
   };
 
-  // Initial load on mount — searches active mission location if provided
+  // Synchronize target coordinates and zoom when location is selected from Omnibar or disaster feed
   useEffect(() => {
-    if (!savedContext.searchQuery && initialMissionLoc) {
+    const handleTargetSelected = (e) => {
+      const detail = e?.detail;
+      if (!detail) return;
+      const { name, displayName, lat, lon, zoom } = detail;
+      if (typeof lat === 'number' && typeof lon === 'number') {
+        setMapCenter([lat, lon]);
+        if (typeof zoom === 'number') {
+          setMapZoom(zoom);
+        }
+        const resolved = displayName || name || '';
+        if (resolved) {
+          setSearchQuery(name || resolved);
+          setResolvedLocation(resolved);
+        }
+      }
+    };
+
+    const handleTimeLensEvent = (e) => {
+      const detail = e?.detail;
+      if (!detail) return;
+      const { title, lat, lng, yearBefore: yb, yearAfter: ya } = detail;
+      if (typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng)) {
+        const cleanTitle = title || `Target (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+        setMapCenter([lat, lng]);
+        setMapZoom(12);
+        setSearchQuery(cleanTitle);
+        setResolvedLocation(`${cleanTitle} (${lat.toFixed(4)}°, ${lng.toFixed(4)}°)`);
+        if (yb) setYearBefore(String(yb));
+        if (ya) setYearAfter(String(ya));
+        setImgBefore(null);
+        setImgAfter(null);
+        handleExecuteSearch(cleanTitle, [lat, lng], { yearBefore: yb, yearAfter: ya });
+      }
+    };
+
+    window.addEventListener('target-location-selected', handleTargetSelected);
+    window.addEventListener('show-timelens', handleTimeLensEvent);
+    return () => {
+      window.removeEventListener('target-location-selected', handleTargetSelected);
+      window.removeEventListener('show-timelens', handleTimeLensEvent);
+    };
+  }, [yearBefore, yearAfter]);
+
+  // Initial load on mount — searches active disaster event if passed, or mission location
+  useEffect(() => {
+    if (savedContext.targetEvent && typeof savedContext.targetEvent.lat === 'number') {
+      const { title, lat, lng } = savedContext.targetEvent;
+      const yb = savedContext.yearBefore || '2024';
+      const ya = savedContext.yearAfter || '2026';
+      setYearBefore(yb);
+      setYearAfter(ya);
+      handleExecuteSearch(title, [lat, lng], {
+        yearBefore: yb,
+        yearAfter: ya
+      });
+    } else if (!savedContext.searchQuery && initialMissionLoc) {
       handleExecuteSearch(initialMissionLoc);
     }
   }, []);
@@ -915,264 +974,312 @@ export default function TimeLensCompare({ onClose }) {
     <div className="absolute inset-0 z-40 bg-mc-panel flex flex-col animate-in fade-in duration-300 overflow-hidden">
 
       {/* ── Top Header & Integrated Mission Bar ── */}
-      <div className="h-16 border-b border-mc-border bg-mc-panel/95 flex items-center justify-between px-5 z-50 shrink-0 gap-3">
-        
-        {/* Title & Home Navigation */}
-        <div className="flex items-center gap-3 shrink-0">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 bg-mc-panel border border-mc-border hover:border-mc-primary text-mc-text hover:text-white rounded-xl font-mono text-xs flex items-center gap-1.5 transition-all shadow-sm group cursor-pointer"
-            title="Return to Home (Mission Control)"
-          >
-            <Home size={14} className="text-mc-primary group-hover:scale-110 transition-transform" />
-            <span className="font-bold hidden xl:inline">HOME</span>
-          </button>
+      <div className="border-b border-mc-border bg-mc-panel/95 z-50 shrink-0">
+        <div className="min-h-14 py-2 px-3 sm:px-5 flex items-center justify-between gap-2">
+          
+          {/* Title & Home Navigation */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <button
+              onClick={onClose}
+              className="p-2 sm:px-3 sm:py-1.5 bg-mc-panel border border-mc-border hover:border-mc-primary text-mc-text hover:text-white rounded-xl font-mono text-xs flex items-center gap-1.5 transition-all shadow-sm group cursor-pointer"
+              title="Return to Home (Mission Control)"
+            >
+              <Home size={14} className="text-mc-primary group-hover:scale-110 transition-transform" />
+              <span className="font-bold hidden xl:inline">HOME</span>
+            </button>
 
-          <div className="items-center gap-2 hidden lg:flex">
-            <Clock className="text-mc-primary" size={20} />
-            <h2 className="font-heading text-base font-bold text-mc-text tracking-wider flex items-center gap-1.5">
-              TIMELENS <span className="text-mc-primary font-normal">DUAL SPLIT</span>
-            </h2>
+            <div className="items-center gap-2 hidden lg:flex">
+              <Clock className="text-mc-primary" size={18} />
+              <h2 className="font-heading text-sm font-bold text-mc-text tracking-wider flex items-center gap-1.5">
+                TIMELENS <span className="text-mc-primary font-normal">DUAL SPLIT</span>
+              </h2>
+            </div>
           </div>
-        </div>
 
-        {/* Integrated Location & Year Search Controls */}
-        <form onSubmit={(e) => { e.preventDefault(); setShowSuggestions(false); handleExecuteSearch(); }} className="flex items-center gap-2 flex-1 max-w-2xl bg-mc-panel p-1.5 rounded-xl border border-mc-border/80 shadow-inner">
-          <div className="relative flex-1 min-w-[120px] lg:min-w-[220px]" ref={suggestionsRef}>
-            <div className="flex items-center gap-2 px-3 py-1 bg-mc-panel rounded-lg border border-mc-border/50">
-              <MapPin size={15} className="text-mc-primary shrink-0" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
-                placeholder="Type place name (e.g. Vijayawada, Hyderabad)..."
-                className="w-full bg-transparent text-mc-text font-mono text-xs outline-none placeholder:text-mc-muted/60"
-              />
-              {isSearchingSuggestions && (
-                <Loader2 size={12} className="animate-spin text-mc-primary shrink-0" />
-              )}
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => { setSearchQuery(''); setSuggestions([]); setShowSuggestions(false); }}
-                  className="text-mc-muted hover:text-white text-xs px-1"
-                  title="Clear input"
-                >
-                  ✕
-                </button>
+          {/* Integrated Location & Year Search Controls */}
+          <form onSubmit={(e) => { e.preventDefault(); setShowSuggestions(false); handleExecuteSearch(); }} className="flex items-center gap-1.5 sm:gap-2 flex-1 max-w-2xl bg-mc-panel p-1 sm:p-1.5 rounded-xl border border-mc-border/80 shadow-inner min-w-0">
+            <div className="relative flex-1 min-w-[80px] sm:min-w-[120px]" ref={suggestionsRef}>
+              <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 bg-mc-panel rounded-lg border border-mc-border/50">
+                <MapPin size={13} className="text-mc-primary shrink-0" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
+                  placeholder="Location..."
+                  className="w-full bg-transparent text-mc-text font-mono text-[11px] sm:text-xs outline-none placeholder:text-mc-muted/60"
+                />
+                {isSearchingSuggestions && (
+                  <Loader2 size={11} className="animate-spin text-mc-primary shrink-0" />
+                )}
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => { setSearchQuery(''); setSuggestions([]); setShowSuggestions(false); }}
+                    className="text-mc-muted hover:text-white p-0.5 rounded cursor-pointer"
+                    title="Clear input"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              {/* Suggestions Dropdown */}
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="absolute left-0 top-full mt-2 w-full min-w-[280px] sm:min-w-[320px] bg-mc-panel/98 border border-mc-border rounded-xl shadow-[0_12px_40px_rgba(0,0,0,0.85)] overflow-hidden z-[200] animate-in fade-in zoom-in-95 duration-150 divide-y divide-mc-border/30">
+                  <div className="px-3 py-1.5 bg-mc-panel text-[10px] font-mono text-mc-muted uppercase tracking-wider flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-bold text-mc-text">
+                      <MapPin size={11} className="text-mc-primary" /> MATCHING PLACES
+                    </span>
+                    <span className="text-mc-primary font-bold text-[9px] px-1.5 py-0.5 bg-mc-primary/15 rounded border border-mc-primary/30">
+                      {suggestions.length} FOUND
+                    </span>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {suggestions.map((item, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleSelectSuggestion(item)}
+                        className="w-full px-3 py-2 text-left hover:bg-mc-primary/20 transition-all flex items-start gap-2.5 group cursor-pointer"
+                      >
+                        <MapPin size={14} className="text-mc-primary mt-0.5 shrink-0 group-hover:scale-110 transition-transform" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-mono font-bold text-mc-text truncate">
+                            {item.short_name}
+                          </p>
+                          <p className="text-[10px] font-mono text-mc-muted truncate">
+                            {item.display_name}
+                          </p>
+                        </div>
+                        <span className="text-[9px] font-mono text-mc-muted/60 shrink-0">
+                          {item.lat.toFixed(2)}, {item.lon.toFixed(2)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
 
-            {/* Suggestions Dropdown */}
-            {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute left-0 top-full mt-2 w-full min-w-[320px] bg-mc-panel/98 border border-mc-border rounded-xl shadow-[0_12px_40px_rgba(0,0,0,0.85)] overflow-hidden z-[200] animate-in fade-in zoom-in-95 duration-150 divide-y divide-mc-border/30">
-                <div className="px-3 py-1.5 bg-mc-panel text-[10px] font-mono text-mc-muted uppercase tracking-wider flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 font-bold text-mc-text">
-                    <MapPin size={11} className="text-mc-primary" /> MATCHING PLACES
-                  </span>
-                  <span className="text-mc-primary font-bold text-[9px] px-1.5 py-0.5 bg-mc-primary/15 rounded border border-mc-primary/30">
-                    {suggestions.length} FOUND
-                  </span>
-                </div>
-                <div className="max-h-60 overflow-y-auto">
-                  {suggestions.map((item, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => handleSelectSuggestion(item)}
-                      className="w-full px-3 py-2 text-left hover:bg-mc-primary/20 transition-all flex items-start gap-2.5 group cursor-pointer"
-                    >
-                      <MapPin size={14} className="text-mc-primary mt-0.5 shrink-0 group-hover:scale-110 transition-transform" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-mono font-bold text-mc-text group-hover: text-mc-text truncate">
-                          {item.short_name}
-                        </p>
-                        <p className="text-[10px] font-mono text-mc-muted truncate">
-                          {item.display_name}
-                        </p>
-                      </div>
-                      <span className="text-[9px] font-mono text-mc-muted/60 shrink-0">
-                        {item.lat.toFixed(2)}, {item.lon.toFixed(2)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
+            <div className="h-4 sm:h-5 w-px bg-mc-border/60 shrink-0" />
+
+            {/* Before Year Selector */}
+            <div className="flex items-center gap-1 px-0.5 sm:px-1 shrink-0">
+              <span className="text-[9px] sm:text-[10px] font-mono text-mc-primary font-bold">T1:</span>
+              <select
+                value={yearBefore}
+                onChange={(e) => { setYearBefore(e.target.value); }}
+                className="bg-mc-panel text-mc-primary font-mono text-[11px] sm:text-xs px-1.5 sm:px-2.5 py-1 rounded-lg border border-mc-border outline-none font-bold"
+              >
+                {[2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026].map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* After Year Selector */}
+            <div className="flex items-center gap-1 px-0.5 sm:px-1 shrink-0">
+              <span className="text-[9px] sm:text-[10px] font-mono text-mc-danger font-bold">T2:</span>
+              <select
+                value={yearAfter}
+                onChange={(e) => { setYearAfter(e.target.value); }}
+                className="bg-mc-panel text-mc-danger font-mono text-[11px] sm:text-xs px-1.5 sm:px-2.5 py-1 rounded-lg border border-mc-danger/40 outline-none font-bold"
+              >
+                {[2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026].map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Search Button */}
+            <button
+              type="submit"
+              disabled={isFetchingImages}
+              className="px-2.5 sm:px-4 py-1.5 skeuo-button-primary text-white font-mono text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-all shadow-sm shrink-0 cursor-pointer disabled:opacity-60"
+              title="Sync Both Maps"
+            >
+              {isFetchingImages ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+              <span className="hidden sm:inline">SYNC MAPS</span>
+            </button>
+          </form>
+
+          {/* Close button + Desktop actions */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Desktop Actions */}
+            <div className="hidden md:flex items-center gap-1.5">
+              {/* Split / Slider Mode Toggle */}
+              <div className="flex bg-mc-panel p-0.5 rounded-lg border border-mc-border">
+                <button
+                  onClick={() => setViewMode('split')}
+                  className={`px-2 py-1 rounded-md text-xs font-mono flex items-center gap-1 transition-all cursor-pointer ${
+                    viewMode === 'split' ? 'bg-mc-primary/15 text-mc-primary border border-mc-primary/30 font-semibold shadow-sm' : 'text-mc-muted hover:text-mc-text border border-transparent'
+                  }`}
+                  title="Dual Split Window"
+                >
+                  <Columns size={12} /> DUAL
+                </button>
+                <button
+                  onClick={() => setViewMode('slider')}
+                  className={`px-2 py-1 rounded-md text-xs font-mono flex items-center gap-1 transition-all cursor-pointer ${
+                    viewMode === 'slider' ? 'bg-mc-primary/15 text-mc-primary border border-mc-primary/30 font-semibold shadow-sm' : 'text-mc-muted hover:text-mc-text border border-transparent'
+                  }`}
+                  title="Swipe Compare Slider"
+                >
+                  <SlidersHorizontal size={12} /> SWIPE
+                </button>
               </div>
-            )}
+
+              <button
+                onClick={() => setIsDrawing(!isDrawing)}
+                className={`p-1.5 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
+                  isDrawing ? 'bg-mc-primary/20 border-mc-primary text-mc-primary shadow-sm' : 'skeuo-button text-mc-muted hover:text-mc-text'
+                }`}
+                title="Draw Bounding Box on Map"
+              >
+                <Crop size={14} className={isDrawing ? 'text-mc-primary' : 'text-mc-muted'} />
+              </button>
+
+              <button
+                onClick={() => { setRulerActive(r => !r); setRulerPoints([]); setRulerDistance(null); }}
+                className={`p-1.5 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
+                  rulerActive ? 'bg-amber-500/20 border-amber-400 text-amber-300 shadow-sm' : 'skeuo-button text-mc-muted hover:text-mc-text'
+                }`}
+                title="Distance Ruler Tool"
+              >
+                <Ruler size={14} className={rulerActive ? 'text-amber-400' : 'text-mc-muted'} />
+              </button>
+
+              <button
+                onClick={() => setShowStreetOverlay(s => !s)}
+                className={`p-1.5 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
+                  showStreetOverlay ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300 shadow-sm' : 'skeuo-button text-mc-muted hover:text-mc-text'
+                }`}
+                title="Toggle Street Overlay"
+              >
+                <Layers size={14} className={showStreetOverlay ? 'text-emerald-400' : 'text-mc-muted'} />
+              </button>
+
+              <button
+                onClick={() => setShowHistory(h => !h)}
+                className={`p-1.5 rounded-lg border flex items-center justify-center transition-all relative cursor-pointer ${
+                  showHistory ? 'bg-mc-primary/20 border-mc-primary text-mc-primary shadow-sm' : 'skeuo-button text-mc-muted hover:text-mc-text'
+                }`}
+                title="Recent Mission History"
+              >
+                <History size={14} className={showHistory ? 'text-mc-primary' : 'text-mc-muted'} />
+                {missionHistory.length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 flex items-center justify-center bg-mc-primary text-white text-[8px] font-bold rounded-full">
+                    {missionHistory.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setShowDownloadModal(true)}
+                className="p-1.5 skeuo-button text-mc-primary hover:text-white rounded-lg transition-all shadow-sm flex items-center justify-center cursor-pointer"
+                title="Export Images"
+              >
+                <Download size={14} />
+              </button>
+
+              <button
+                onClick={handleRunFullAnalysis}
+                disabled={isExecuting}
+                className="p-1.5 skeuo-button-primary text-white rounded-lg transition-all shadow-sm flex items-center justify-center disabled:opacity-50 cursor-pointer"
+                title="Analyze Report"
+              >
+                {isExecuting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />}
+              </button>
+
+              <button
+                onClick={() => setShowAssistant(a => !a)}
+                className={`p-1.5 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
+                  showAssistant ? 'bg-mc-primary text-black font-bold shadow-sm border-mc-primary' : 'skeuo-button text-mc-primary hover:text-white'
+                }`}
+                title="Toggle TimeLens AI Copilot"
+              >
+                <MessageSquare size={14} />
+              </button>
+            </div>
+
+            {/* Close Button */}
+            <button onClick={onClose} className="text-mc-muted hover:text-mc-danger p-1 rounded-lg transition-colors cursor-pointer" title="Close TimeLens">
+              <X size={18} />
+            </button>
           </div>
+        </div>
 
-          <div className="h-5 w-px bg-mc-border/60 shrink-0" />
-
-          {/* Before Year Selector */}
-          <div className="flex items-center gap-1.5 px-1 shrink-0">
-            <span className="text-[10px] font-mono text-mc-primary font-bold">T1:</span>
-            <select
-              value={yearBefore}
-              onChange={(e) => { setYearBefore(e.target.value); }}
-              className="bg-mc-panel text-mc-primary font-mono text-xs px-2.5 py-1 rounded-lg border border-mc-border outline-none font-bold"
-            >
-              {[2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026].map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* After Year Selector */}
-          <div className="flex items-center gap-1.5 px-1 shrink-0">
-            <span className="text-[10px] font-mono text-mc-danger font-bold">T2:</span>
-            <select
-              value={yearAfter}
-              onChange={(e) => { setYearAfter(e.target.value); }}
-              className="bg-mc-panel text-mc-danger font-mono text-xs px-2.5 py-1 rounded-lg border border-mc-danger/40 outline-none font-bold"
-            >
-              {[2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026].map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Search Button */}
+        {/* Mobile secondary tools row */}
+        <div className="md:hidden flex items-center gap-1.5 px-3 py-1.5 border-t border-mc-border/40 overflow-x-auto scrollbar-none">
           <button
-            type="submit"
-            disabled={isFetchingImages}
-            className="px-4 py-1.5 skeuo-button-primary text-white font-mono text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-all shadow-sm shrink-0 cursor-pointer disabled:opacity-60"
+            onClick={() => setViewMode(v => v === 'split' ? 'slider' : 'split')}
+            className="px-2 py-1 bg-mc-panel border border-mc-border text-mc-primary text-[10px] font-mono font-bold rounded-md shrink-0 flex items-center gap-1"
           >
-            {isFetchingImages ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-            <span>SYNC MAPS</span>
+            {viewMode === 'split' ? <Columns size={11} /> : <SlidersHorizontal size={11} />}
+            <span>{viewMode === 'split' ? 'DUAL' : 'SWIPE'}</span>
           </button>
-        </form>
 
-        {/* View Mode & Actions */}
-        <div className="flex items-center gap-2 shrink-0">
-          
-          {/* Split / Slider Mode Toggle */}
-          <div className="flex bg-mc-panel p-1 rounded-lg border border-mc-border">
-            <button
-              onClick={() => setViewMode('split')}
-              className={`px-2.5 py-1 rounded-md text-xs font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
-                viewMode === 'split' ? 'bg-mc-primary/15 text-mc-primary border border-mc-primary/30 font-semibold shadow-sm' : 'text-mc-muted hover:text-mc-text border border-transparent'
-              }`}
-              title="Dual Split Window (Side-by-Side)"
-            >
-              <Columns size={13} /> DUAL SPLIT
-            </button>
-            <button
-              onClick={() => setViewMode('slider')}
-              className={`px-2.5 py-1 rounded-md text-xs font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
-                viewMode === 'slider' ? 'bg-mc-primary/15 text-mc-primary border border-mc-primary/30 font-semibold shadow-sm' : 'text-mc-muted hover:text-mc-text border border-transparent'
-              }`}
-              title="Swipe Compare Slider"
-            >
-              <SlidersHorizontal size={13} /> SWIPE SLIDER
-            </button>
-          </div>
-
-          {/* Area Selection Button */}
           <button
             onClick={() => setIsDrawing(!isDrawing)}
-            className={`p-2 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
-              isDrawing
-                ? 'bg-mc-primary/20 border-mc-primary text-mc-primary shadow-sm'
-                : 'skeuo-button text-mc-muted hover:text-mc-text'
-            }`}
-            title="Draw Bounding Box on Map"
+            className={`p-1.5 rounded-md border shrink-0 ${isDrawing ? 'bg-mc-primary/20 border-mc-primary text-mc-primary' : 'bg-mc-panel border-mc-border text-mc-muted'}`}
+            title="Area Select"
           >
-            <Crop size={16} className={isDrawing ? 'text-mc-primary' : 'text-mc-muted'} />
+            <Crop size={13} />
           </button>
 
-          {/* Ruler Tool Button */}
           <button
             onClick={() => { setRulerActive(r => !r); setRulerPoints([]); setRulerDistance(null); }}
-            className={`p-2 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
-              rulerActive
-                ? 'bg-amber-500/20 border-amber-400 text-amber-300 shadow-sm'
-                : 'skeuo-button text-mc-muted hover:text-mc-text'
-            }`}
-            title="Distance Ruler Tool"
+            className={`p-1.5 rounded-md border shrink-0 ${rulerActive ? 'bg-amber-500/20 border-amber-400 text-amber-300' : 'bg-mc-panel border-mc-border text-mc-muted'}`}
+            title="Ruler"
           >
-            <Ruler size={16} className={rulerActive ? 'text-amber-400' : 'text-mc-muted'} />
+            <Ruler size={13} />
           </button>
 
-          {/* Street Overlay Toggle */}
           <button
             onClick={() => setShowStreetOverlay(s => !s)}
-            className={`p-2 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
-              showStreetOverlay
-                ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300 shadow-sm'
-                : 'skeuo-button text-mc-muted hover:text-mc-text'
-            }`}
-            title="Toggle Street & Infrastructure Overlay"
+            className={`p-1.5 rounded-md border shrink-0 ${showStreetOverlay ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300' : 'bg-mc-panel border-mc-border text-mc-muted'}`}
+            title="Streets"
           >
-            <Layers size={16} className={showStreetOverlay ? 'text-emerald-400' : 'text-mc-muted'} />
+            <Layers size={13} />
           </button>
 
-          {/* Mission History Drawer Toggle */}
-          <button
-            onClick={() => setShowHistory(h => !h)}
-            className={`p-2 rounded-lg border flex items-center justify-center transition-all relative cursor-pointer ${
-              showHistory
-                ? 'bg-mc-primary/20 border-mc-primary text-mc-primary shadow-sm'
-                : 'skeuo-button text-mc-muted hover:text-mc-text'
-            }`}
-            title="Recent Mission History"
-          >
-            <History size={16} className={showHistory ? 'text-mc-primary' : 'text-mc-muted'} />
-            {missionHistory.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-mc-primary text-white text-[9px] font-bold rounded-full">
-                {missionHistory.length}
-              </span>
-            )}
-          </button>
-
-          {/* Export Imagery Button */}
           <button
             onClick={() => setShowDownloadModal(true)}
-            className="p-2 skeuo-button text-mc-primary hover:text-white rounded-lg transition-all shadow-sm flex items-center justify-center cursor-pointer"
-            title="Export Images"
+            className="p-1.5 bg-mc-panel border border-mc-border text-mc-primary rounded-md shrink-0"
+            title="Export Assets"
           >
-            <Download size={16} />
+            <Download size={13} />
           </button>
 
-          {/* Analyze Report Button */}
           <button
             onClick={handleRunFullAnalysis}
             disabled={isExecuting}
-            className="p-2 skeuo-button-primary text-white rounded-lg transition-all shadow-sm flex items-center justify-center disabled:opacity-50 cursor-pointer"
-            title="Analyze Report"
+            className="px-2 py-1 bg-mc-primary text-black font-mono font-bold text-[10px] rounded-md shrink-0 flex items-center gap-1"
+            title="Run Analysis"
           >
-            {isExecuting ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />}
+            {isExecuting ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} fill="currentColor" />}
+            <span>ANALYZE</span>
           </button>
 
-          {/* AI Copilot Toggle Button */}
           <button
             onClick={() => setShowAssistant(a => !a)}
-            className={`p-2 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
-              showAssistant
-                ? 'bg-mc-primary text-black font-bold shadow-sm border-mc-primary'
-                : 'skeuo-button text-mc-primary hover:text-white'
-            }`}
-            title="Toggle TimeLens AI Copilot"
-            aria-label="Toggle TimeLens AI Copilot"
+            className={`p-1.5 rounded-md border shrink-0 ${showAssistant ? 'bg-mc-primary text-black' : 'bg-mc-panel border-mc-border text-mc-muted'}`}
+            title="Copilot"
           >
-            <MessageSquare size={16} />
-          </button>
-
-          {/* Close Button */}
-          <button onClick={onClose} className="text-mc-muted hover:text-mc-danger p-1.5 rounded-lg transition-colors ml-0.5 cursor-pointer" title="Close TimeLens">
-            <X size={20} />
+            <MessageSquare size={13} />
           </button>
         </div>
       </div>
 
       {/* ── Sub Navigation Tabs ── */}
-      <div className="h-10 border-b border-mc-border/60 bg-mc-panel px-5 flex items-center justify-between z-30 shrink-0">
-        <div className="flex gap-1.5">
+      <div className="h-10 border-b border-mc-border/60 bg-mc-panel px-3 sm:px-5 flex items-center justify-between z-30 shrink-0 overflow-x-auto scrollbar-none">
+        <div className="flex gap-1.5 shrink-0">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActiveTab(id)}
-              className={`px-3 py-1 rounded-md text-xs font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`px-2.5 sm:px-3 py-1 rounded-md text-[11px] sm:text-xs font-mono flex items-center gap-1.5 transition-all cursor-pointer shrink-0 whitespace-nowrap ${
                 activeTab === id
                   ? 'bg-mc-primary/15 text-mc-primary border border-mc-primary/30 font-semibold shadow-sm'
                   : 'text-mc-muted hover:text-mc-text hover:bg-mc-border/20 border border-transparent'
@@ -1280,7 +1387,7 @@ export default function TimeLensCompare({ onClose }) {
           <div
             ref={hudElemRef}
             style={{
-              top: hudPos.y !== null ? `${hudPos.y}px` : '16px',
+              top: hudPos.y !== null ? `${hudPos.y}px` : (typeof window !== 'undefined' && window.innerWidth < 768 ? '52px' : '16px'),
               left: hudPos.x !== null ? `${hudPos.x}px` : '50%',
               transform: hudPos.x !== null ? 'none' : 'translateX(-50%)',
             }}
@@ -1358,9 +1465,9 @@ export default function TimeLensCompare({ onClose }) {
                     className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-950/60 border border-sky-500/40 text-sky-200"
                     title={`Sentinel-2 QA60 / SCL Cloud Mask Verified. T1 (${yearBefore}): ${liveMetrics.cloudT1 ?? '2'}% cloud, T2 (${yearAfter}): ${liveMetrics.cloudT2 ?? '2'}% cloud. True surface change confirmed.`}
                   >
-                    <span>☁ Cloud: T1({liveMetrics.cloudT1 ?? '2.4'}%) T2({liveMetrics.cloudT2 ?? '2.1'}%)</span>
+                    <span>Cloud: T1({liveMetrics.cloudT1 ?? '2.4'}%) T2({liveMetrics.cloudT2 ?? '2.1'}%)</span>
                     <span className="text-emerald-400 font-extrabold text-[9px] tracking-wider bg-emerald-950/80 px-1 py-0.2 rounded border border-emerald-500/40">
-                      MASKED ✓
+                      MASKED
                     </span>
                   </div>
                 </>
@@ -1380,7 +1487,7 @@ export default function TimeLensCompare({ onClose }) {
                   className="w-5 h-5 rounded-full hover:bg-mc-danger/20 text-mc-muted hover:text-mc-danger flex items-center justify-center text-[10px] transition-colors cursor-pointer"
                   title="Close HUD (re-open with SHOW HUD in toolbar)"
                 >
-                  ✕
+                  <X size={11} />
                 </button>
               </div>
             </div>
@@ -1394,7 +1501,7 @@ export default function TimeLensCompare({ onClose }) {
               <Ruler size={16} className="text-amber-400" />
               <span className="font-bold">Measured Distance:</span>
               <span className="text-white font-bold text-base">{rulerDistance}</span>
-              <button onClick={() => { setRulerPoints([]); setRulerDistance(null); }} className="ml-2 text-mc-muted hover:text-white text-xs">✕</button>
+              <button onClick={() => { setRulerPoints([]); setRulerDistance(null); }} className="ml-2 text-mc-muted hover:text-white p-0.5 rounded cursor-pointer" title="Clear measurement"><X size={12} /></button>
             </div>
           </div>
         )}
@@ -1403,20 +1510,21 @@ export default function TimeLensCompare({ onClose }) {
         {activeTab === 'imagery' && viewMode === 'split' && (
           <div className="flex-1 flex flex-col md:flex-row w-full relative">
 
-            {/* 🔵 LEFT WINDOW: BEFORE (T1) */}
+            {/* LEFT WINDOW: BEFORE (T1) */}
             <div className="flex-1 border-b md:border-b-0 md:border-r border-mc-border relative h-full min-h-[280px]">
-              {/* Window Badge */}
-              <div className="absolute top-4 left-4 z-[400] bg-mc-bg/90 px-3.5 py-1.5 rounded-lg border border-mc-primary text-xs font-mono font-bold text-mc-primary shadow-sm flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-mc-primary" />
-                <span>BEFORE BASELINE: {yearBefore}</span>
-              </div>
-
-              <div className="absolute bottom-4 left-4 z-[400]">
+              {/* Window Badge + Download Quick Action */}
+              <div className="absolute top-3 left-3 z-[400] flex items-center gap-2">
+                <div className="bg-mc-panel/95 backdrop-blur-md px-3 py-1.5 rounded-lg border border-mc-primary text-xs font-mono font-bold text-mc-primary shadow-md flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-mc-primary" />
+                  <span>BEFORE: {yearBefore}</span>
+                </div>
                 <button
                   onClick={() => handleDownloadImagery(yearBefore, 'png')}
-                  className="px-3 py-1.5 bg-mc-bg/80 border border-mc-border hover:bg-mc-primary hover:text-black text-mc-primary font-mono text-[11px] rounded-lg transition-all flex items-center gap-1.5 shadow-sm"
+                  className="p-1.5 bg-mc-panel/95 backdrop-blur-md border border-mc-border hover:border-mc-primary hover:text-mc-primary text-mc-muted rounded-lg transition-all shadow-md cursor-pointer"
+                  title={`Download baseline imagery (${yearBefore})`}
+                  aria-label={`Download baseline imagery for ${yearBefore}`}
                 >
-                  <Download size={12} /> DOWNLOAD {yearBefore} IMAGE
+                  <Download size={13} />
                 </button>
               </div>
 
@@ -1473,20 +1581,21 @@ export default function TimeLensCompare({ onClose }) {
               </MapContainer>
             </div>
 
-            {/* 🔴 RIGHT WINDOW: AFTER (T2) */}
+            {/* RIGHT WINDOW: AFTER (T2) */}
             <div className="flex-1 relative h-full min-h-[280px]">
-              {/* Window Badge */}
-              <div className="absolute top-4 right-4 z-[400] bg-mc-bg/90 px-3.5 py-1.5 rounded-lg border border-mc-danger text-xs font-mono font-bold text-mc-danger shadow-sm flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-mc-danger" />
-                <span>AFTER COMPARISON: {yearAfter}</span>
-              </div>
-
-              <div className="absolute bottom-4 right-4 z-[400]">
+              {/* Window Badge + Download Quick Action */}
+              <div className="absolute top-3 right-3 z-[400] flex items-center gap-2">
+                <div className="bg-mc-panel/95 backdrop-blur-md px-3 py-1.5 rounded-lg border border-mc-danger text-xs font-mono font-bold text-mc-danger shadow-md flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-mc-danger" />
+                  <span>AFTER: {yearAfter}</span>
+                </div>
                 <button
                   onClick={() => handleDownloadImagery(yearAfter, 'png')}
-                  className="px-3 py-1.5 bg-mc-bg/80 border border-mc-danger/60 hover:bg-mc-danger hover:text-white text-mc-danger font-mono text-[11px] rounded-lg transition-all flex items-center gap-1.5 shadow-sm"
+                  className="p-1.5 bg-mc-panel/95 backdrop-blur-md border border-mc-border hover:border-mc-danger hover:text-mc-danger text-mc-muted rounded-lg transition-all shadow-md cursor-pointer"
+                  title={`Download comparison imagery (${yearAfter})`}
+                  aria-label={`Download comparison imagery for ${yearAfter}`}
                 >
-                  <Download size={12} /> DOWNLOAD {yearAfter} IMAGE
+                  <Download size={13} />
                 </button>
               </div>
 
@@ -1689,14 +1798,14 @@ export default function TimeLensCompare({ onClose }) {
 
         {/* ── Bottom Floating Mission Brief ── */}
         {activeTab === 'imagery' && (
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-mc-panel/95 border border-mc-border px-5 py-3 rounded-2xl shadow-md z-40 max-w-xl w-full flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 min-w-0">
-              <Map className="text-mc-primary shrink-0" size={18} />
+          <div className="absolute bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 bg-mc-panel/95 backdrop-blur-md border border-mc-border px-3 sm:px-5 py-2.5 sm:py-3 rounded-2xl shadow-xl z-40 w-[calc(100%-1.5rem)] max-w-xl flex items-center justify-between gap-2 sm:gap-4">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <Map className="text-mc-primary shrink-0" size={16} />
               <div className="min-w-0">
-                <p className="font-heading text-xs text-mc-text uppercase tracking-wider font-bold truncate">
+                <p className="font-heading text-[11px] sm:text-xs text-mc-text uppercase tracking-wider font-bold truncate">
                   {resolvedLocation}
                 </p>
-                <p className="text-mc-muted text-[11px] font-mono truncate">
+                <p className="text-mc-muted text-[10px] sm:text-[11px] font-mono truncate">
                   {yearBefore} Baseline vs {yearAfter} Comparison
                 </p>
               </div>
@@ -1705,7 +1814,7 @@ export default function TimeLensCompare({ onClose }) {
             <button
               onClick={handleRunFullAnalysis}
               disabled={isExecuting}
-              className="px-4 py-2 bg-mc-primary text-black font-heading font-bold text-xs rounded-xl hover:bg-white transition-colors flex items-center gap-1.5 shrink-0 shadow-md disabled:opacity-50"
+              className="px-3 sm:px-4 py-1.5 sm:py-2 bg-mc-primary text-black font-heading font-bold text-[11px] sm:text-xs rounded-xl hover:bg-white transition-colors flex items-center gap-1.5 shrink-0 shadow-md disabled:opacity-50 cursor-pointer whitespace-nowrap"
             >
               {isExecuting ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} fill="currentColor" />}
               <span>RUN AI REPORT</span>

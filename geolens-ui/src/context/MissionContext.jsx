@@ -119,7 +119,7 @@ export function MissionProvider({ children }) {
           if (statusData.status === 'completed') {
             clearConnections();
             setAgents(Object.fromEntries(Object.keys(INITIAL_AGENTS).map(k => [k, 'completed'])));
-            addLog('> ✓ MISSION COMPLETE — All agents finished.');
+            addLog('> MISSION COMPLETE — All 5 agents synchronized.');
             if (statusData.result) setFinalReport(statusData.result);
             setIsExecuting(false);
           }

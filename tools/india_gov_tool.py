@@ -24,6 +24,8 @@ from storage.storage_manager import StorageManager
 
 class IndiaGovToolInput(BaseModel):
     query: str = Field(..., description="Search keywords, e.g. 'flood Andhra Pradesh', 'rainfall district wise', 'forest cover India'")
+    state: Optional[str] = Field(None, description="Optional state name to narrow query.")
+    location: Optional[str] = Field(None, description="Optional location name to narrow query.")
     max_results: Optional[int] = Field(10, description="Max number of datasets to return.")
     format_filter: Optional[str] = Field("", description="Filter by format: 'csv', 'json', 'xml', 'pdf', 'shp'. Leave empty for all.")
     query_id: Optional[str] = Field("", description="Query ID for storage tracking.")
@@ -51,25 +53,42 @@ class IndiaGovTool(BaseTool):
     def _run(
         self,
         query: str,
+        state: Optional[str] = None,
+        location: Optional[str] = None,
         max_results: Optional[int] = 10,
         format_filter: Optional[str] = "",
         query_id: str = "",
     ) -> str:
+        if state and state.lower() not in query.lower():
+            query = f"{query} {state}"
+        if location and location.lower() not in query.lower():
+            query = f"{query} {location}"
+
         api_key = os.getenv("INDIA_GOV_API_KEY", "")
         has_key = bool(api_key and api_key != "your_india_gov_api_key_here")
 
         if not has_key:
             return json.dumps({
-                "status": "api_key_required",
-                "message": (
-                    "data.gov.in requires a free API key. "
-                    "Register at: https://data.gov.in/user/register\n"
-                    "After registration, set INDIA_GOV_API_KEY in your .env file.\n\n"
-                    "Alternative: Visit https://data.gov.in and search manually for:\n"
-                    f"  '{query}'"
-                ),
-                "manual_search_url": f"https://data.gov.in/search/?q={query.replace(' ', '+')}",
-                "key_env_var": "INDIA_GOV_API_KEY",
+                "status": "official_portals_referenced",
+                "query": query,
+                "authoritative_sources": [
+                    {
+                        "agency": "ISRO Bhuvan Geoportal",
+                        "url": "https://bhuvan.nrsc.gov.in/",
+                        "description": "Satellite imagery, thematic maps, LULC and disaster mapping for India."
+                    },
+                    {
+                        "agency": "National Disaster Management Authority (NDMA)",
+                        "url": "https://ndma.gov.in/",
+                        "description": "National hazard maps, vulnerability atlases, and guidelines."
+                    },
+                    {
+                        "agency": "Open Government Data (OGD) Platform India",
+                        "url": f"https://data.gov.in/search/?q={query.replace(' ', '+')}",
+                        "description": f"Official datasets matching query: '{query}'"
+                    }
+                ],
+                "note": "For automated direct REST retrieval from data.gov.in, set INDIA_GOV_API_KEY in .env.",
             })
 
         print(f"[IndiaGovTool] Searching data.gov.in for: '{query}'")
@@ -85,11 +104,21 @@ class IndiaGovTool(BaseTool):
             params["filters[format]"] = format_filter.lower()
 
         try:
-            response = requests.get(self.BASE_URL, params=params, timeout=20)
+            response = requests.get(self.BASE_URL, params=params, timeout=12)
             response.raise_for_status()
             data = response.json()
         except requests.RequestException as e:
-            return json.dumps({"error": f"data.gov.in API error: {str(e)}"})
+            print(f"[IndiaGovTool] data.gov.in connection timeout/error ({e}) — engaging authoritative portal links")
+            return json.dumps({
+                "status": "official_portals_fallback",
+                "query": query,
+                "note": f"data.gov.in server temporarily slow/unavailable: {str(e)}",
+                "authoritative_sources": [
+                    {"agency": "ISRO Bhuvan Geoportal", "url": "https://bhuvan.nrsc.gov.in/", "description": "National remote sensing & disaster mapping for India."},
+                    {"agency": "National Disaster Management Authority (NDMA)", "url": "https://ndma.gov.in/", "description": "National hazard maps & disaster statistics."},
+                    {"agency": "Open Government Data (OGD) Search", "url": f"https://data.gov.in/search/?q={query.replace(' ', '+')}", "description": f"Direct link for '{query}'"}
+                ]
+            })
 
         records = data.get("records", [])
         datasets = []

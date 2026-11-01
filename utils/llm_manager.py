@@ -4,9 +4,8 @@ GeoLens AI - Multi-Provider Round-Robin LLM Manager
 Phase 6.4 — Rate-Limit Resilience & Multi-Provider Load Balancing
 
 Manages an intelligent round-robin pool across:
-  - Groq Cloud API (Llama 3.3 70B, Llama 3.1 8B — ultra high-speed inference)
-  - Google Gemini API (Dual/Triple key rotation for large context & multimodality)
-  - Local Ollama (Offline fallback & private on-premise execution)
+  - Groq Cloud API (Llama 3.3 70B — ultra high-speed inference)
+  - Google Gemini API (Triple-key rotation for large context & multimodality)
 
 Features:
   - Per-slot RPM/RPD tracking and token budget enforcement
@@ -24,14 +23,27 @@ import os
 import time
 import random
 import threading
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
+
+# Sandbox safe paths for CrewAI credentials and telemetry
+_crewai_store = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "workspace", "crewai_storage"))
+os.makedirs(_crewai_store, exist_ok=True)
+os.environ.setdefault("CREWAI_STORAGE_DIR", _crewai_store)
+os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
+
+try:
+    import crewai_core.token_manager as _tm
+    _tm.TokenManager._get_secure_storage_path = lambda self: Path(_crewai_store)
+except Exception:
+    pass
 
 from crewai import LLM
 
 
 # ── Free-tier limits (conservative headroom) ─────────────────────────────────
-GEMINI_FREE_RPM       = 14        # Gemini 2.0/2.5 Flash free: 15 RPM cap at 14
+GEMINI_FREE_RPM       = 14        # Gemini 2.0/2.5/3.5 Flash free: 15 RPM cap at 14
 GEMINI_FREE_TPM       = 900_000   # 1M TPM cap at 900k
 GEMINI_FREE_RPD       = 1_400     # daily request cap (~1500)
 
@@ -43,11 +55,11 @@ BACKOFF_MAX_SECS      = 300       # max single wait (5 min)
 
 @dataclass
 class KeySlot:
-    """Tracks usage for a single LLM API key or local model slot."""
+    """Tracks usage for a single LLM API key slot."""
     key:        str
     model:      str
     name:       str             # human label for telemetry & logs
-    provider:   str = "gemini"  # "gemini", "groq", "ollama"
+    provider:   str = "gemini"  # "gemini", "groq"
     base_url:   Optional[str] = None
     rpm_limit:  int = GEMINI_FREE_RPM
     rpd_limit:  int = GEMINI_FREE_RPD
@@ -61,17 +73,7 @@ class KeySlot:
 
     def get_llm(self) -> LLM:
         if self._llm is None:
-            if self.provider == "ollama" or self.model.startswith("ollama/"):
-                default_url = "http://host.docker.internal:11434" if os.path.exists('/.dockerenv') else "http://localhost:11434"
-                base_url = self.base_url or os.getenv("OLLAMA_BASE_URL", default_url)
-                # timeout=600 → 10 minutes. Local models on CPU need time for large GIS contexts.
-                self._llm = LLM(
-                    model=self.model,
-                    base_url=base_url,
-                    temperature=0.1,
-                    timeout=600,
-                )
-            elif self.provider == "groq" or self.model.startswith("groq/") or (self.base_url and "groq.com" in self.base_url):
+            if self.provider == "groq" or self.model.startswith("groq/") or (self.base_url and "groq.com" in self.base_url):
                 # Groq provides an OpenAI-compatible API endpoint
                 clean_model = self.model.replace("groq/", "").strip()
                 endpoint = self.base_url or os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
@@ -104,10 +106,8 @@ class KeySlot:
 
     def is_available(self) -> bool:
         """Return True if this slot is currently available to handle a request."""
-        # For API key providers, key must be present and not a placeholder
-        if self.provider in ("gemini", "groq"):
-            if not self.key or self.key.strip() in ("", "YOUR_GEMINI_KEY_HERE", "YOUR_SECOND_GEMINI_KEY_HERE", "YOUR_GROQ_KEY_HERE"):
-                return False
+        if not self.key or self.key.strip() in ("", "YOUR_GEMINI_KEY_HERE", "YOUR_SECOND_GEMINI_KEY_HERE", "YOUR_THIRD_GEMINI_KEY_HERE", "YOUR_GROQ_KEY_HERE"):
+            return False
 
         now = time.time()
         # In cooldown from a recent 429 or connection failure?
@@ -115,18 +115,6 @@ class KeySlot:
             remaining = int(self.cooldown_secs - (now - self.last_429_at))
             print(f"[LLMManager] Slot '{self.name}' in cooldown for {remaining}s more.")
             return False
-
-        # If Ollama, verify local service is active before returning slot
-        if self.provider == "ollama" or self.model.startswith("ollama/"):
-            default_url = "http://host.docker.internal:11434" if os.path.exists('/.dockerenv') else "http://localhost:11434"
-            base_url = self.base_url or os.getenv("OLLAMA_BASE_URL", default_url)
-            try:
-                import urllib.request
-                urllib.request.urlopen(f"{base_url.rstrip('/')}/api/tags", timeout=1.0)
-                return True
-            except Exception:
-                print(f"[LLMManager] Ollama service at {base_url} is unreachable. Skipping Ollama slot.")
-                return False
 
         self._refresh_windows()
         if self.requests_this_minute >= self.rpm_limit:
@@ -156,7 +144,7 @@ class KeySlot:
 
 class GeminiKeyPool:
     """
-    Thread-safe multi-provider round-robin pool across Groq, Gemini, and Ollama.
+    Thread-safe multi-provider round-robin pool across Groq and Gemini Triple-Key rotation.
     Automatically rotates to the next available healthy key on each get_llm() call.
     On 429, marks the slot as cooling-down and seamlessly fails over to another key.
     """
@@ -170,12 +158,15 @@ class GeminiKeyPool:
     def _init_slots(self):
         self._slots = []
 
-        # ── 1. Google Gemini API (Primary Key) ──────────────────────────────
+        # Model definitions
         raw_gemini = os.getenv("GEMINI_MODEL", "gemini/gemini-3.5-flash-lite").strip('"\' ')
         gemini_model = "gemini/gemini-3.5-flash-lite" if raw_gemini in ("gemini/gemini-2.5-flash", "gemini/gemini-3.6-flash", "gemini/gemini-2.0-flash", "gemini-2.5-flash", "gemini-3.6-flash") else raw_gemini
+        
         gemini_key1  = os.getenv("GEMINI_API_KEY_1", os.getenv("GEMINI_API_KEY", "")).strip()
         gemini_key2  = os.getenv("GEMINI_API_KEY_2", "").strip()
+        gemini_key3  = os.getenv("GEMINI_API_KEY_3", "").strip()
 
+        # ── Slot 1: Google Gemini API (Primary Key) ─────────────────────────
         self._slots.append(KeySlot(
             key=gemini_key1 if gemini_key1 not in ("YOUR_GEMINI_KEY_HERE", "") else "",
             model=gemini_model,
@@ -185,7 +176,7 @@ class GeminiKeyPool:
             rpd_limit=GEMINI_FREE_RPD,
         ))
 
-        # ── 2. Groq Cloud API (High-Speed Llama 3.3 70B) ─────────────────────
+        # ── Slot 2: Groq Cloud API (High-Speed Llama 3.3 70B) ────────────────
         groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip('"\' ')
         groq_key1  = os.getenv("GROQ_API_KEY_1", os.getenv("GROQ_API_KEY", "")).strip()
         groq_url   = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").strip()
@@ -200,7 +191,7 @@ class GeminiKeyPool:
             rpd_limit=GROQ_FREE_RPD,
         ))
 
-        # ── 3. Google Gemini API (Secondary Key) ────────────────────────────
+        # ── Slot 3: Google Gemini API (Secondary Key) ───────────────────────
         self._slots.append(KeySlot(
             key=gemini_key2 if gemini_key2 not in ("YOUR_SECOND_GEMINI_KEY_HERE", "") else "",
             model=gemini_model,
@@ -210,16 +201,14 @@ class GeminiKeyPool:
             rpd_limit=GEMINI_FREE_RPD,
         ))
 
-        # ── 4. Ollama (Local offline execution) ──────────────────────────────
-        ollama = os.getenv("OLLAMA_MODEL", "qwen3:8b").strip('"\' ')
-        clean_ollama = ollama.replace("ollama/", "")
+        # ── Slot 4: Google Gemini API (Tertiary Key) ────────────────────────
         self._slots.append(KeySlot(
-            key="offline",
-            model=f"ollama/{clean_ollama}",
-            name=f"OLLAMA_{clean_ollama.upper()}",
-            provider="ollama",
-            rpm_limit=99999,
-            rpd_limit=999999,
+            key=gemini_key3 if gemini_key3 not in ("YOUR_THIRD_GEMINI_KEY_HERE", "") else "",
+            model=gemini_model,
+            name="GEMINI_KEY_3",
+            provider="gemini",
+            rpm_limit=GEMINI_FREE_RPM,
+            rpd_limit=GEMINI_FREE_RPD,
         ))
 
         providers = sorted(list(set(s.provider.capitalize() for s in self._slots)))
@@ -243,14 +232,7 @@ class GeminiKeyPool:
     def get_llm(self, require_gemini: bool = False, require_cloud: bool = False) -> LLM:
         """
         Return the next available healthy LLM from the round-robin pool.
-        
-        Args:
-            require_gemini: If True, restricts selection to cloud providers (Gemini or Groq),
-                           skipping local offline Ollama for high-throughput GIS/EO tasks.
-            require_cloud:  Alias for require_gemini (skips local Ollama).
         """
-        skip_offline = require_gemini or require_cloud
-
         with self._lock:
             max_wait = BACKOFF_MAX_SECS
             waited   = 0
@@ -262,8 +244,8 @@ class GeminiKeyPool:
                     slot = self._slots[self._index]
                     self._index = (self._index + 1) % len(self._slots)
 
-                    if skip_offline and slot.provider == "ollama":
-                        continue  # Skip local Ollama if cloud throughput is required
+                    if require_gemini and slot.provider != "gemini":
+                        continue
 
                     if slot.is_available():
                         slot.record_request()
@@ -278,7 +260,7 @@ class GeminiKeyPool:
 
             raise RuntimeError(
                 f"All LLM slots exhausted after {max_wait}s. "
-                "Check Groq/Gemini quota or ensure Ollama service is reachable."
+                "Check Groq/Gemini quota or arm additional keys."
             )
 
     def notify_429(self, llm: LLM):
@@ -297,7 +279,7 @@ class GeminiKeyPool:
         with self._lock:
             result = {}
             for slot in self._slots:
-                is_configured = bool(slot.key and slot.key not in ("YOUR_GEMINI_KEY_HERE", "YOUR_SECOND_GEMINI_KEY_HERE", "YOUR_GROQ_KEY_HERE", "")) if slot.provider != "ollama" else True
+                is_configured = bool(slot.key and slot.key not in ("YOUR_GEMINI_KEY_HERE", "YOUR_SECOND_GEMINI_KEY_HERE", "YOUR_THIRD_GEMINI_KEY_HERE", "YOUR_GROQ_KEY_HERE", ""))
                 result[slot.name] = {
                     "provider": slot.provider,
                     "model": slot.model,
@@ -312,6 +294,91 @@ class GeminiKeyPool:
                     ) if slot.last_429_at > 0 else 0,
                 }
             return result
+
+
+# Backwards compatibility alias
+LLMKeyPool = GeminiKeyPool
+
+# ── Global singleton pool ─────────────────────────────────────────────────────
+_pool: Optional[GeminiKeyPool] = None
+_pool_lock = threading.Lock()
+
+
+def get_pool() -> GeminiKeyPool:
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                _pool = GeminiKeyPool()
+    return _pool
+
+
+def get_llm(require_gemini: bool = False, require_cloud: bool = False) -> LLM:
+    """
+    Public API: get the next available healthy LLM from the multi-provider pool.
+    Call this across all agents, tasks, and API chat endpoints.
+    """
+    return get_pool().get_llm(require_gemini=require_gemini, require_cloud=require_cloud)
+
+
+def notify_quota_error(llm: LLM):
+    """
+    Public API: notify the pool that an LLM instance received a 429 quota exhaustion.
+    """
+    get_pool().notify_429(llm)
+
+
+def pool_status() -> Dict[str, Any]:
+    """Return pool health and telemetry for the /api/telemetry and /api/admin endpoints."""
+    return get_pool().status()
+
+
+# ── Enhanced retry wrapper using the multi-provider pool ──────────────────────
+
+def run_with_key_rotation(func, max_attempts: int = 6):
+    """
+    Execute `func()` with automatic multi-provider key rotation on 429 or rate limits.
+
+    If a 429 is encountered:
+      1. Marks the exhausted key/slot as cooling down in the pool
+      2. Immediately retries with the next healthy provider (Groq / Gemini)
+      3. Backs off progressively only if all keys across all providers are on cooldown
+    """
+    last_exception = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return func()
+
+        except Exception as e:
+            err_str = str(e).lower()
+            is_quota = any(x in err_str for x in ("429", "resource_exhausted", "quota", "rate limit"))
+            is_connection = any(x in err_str for x in ("connection error", "failed to connect", "connection refused"))
+
+            if not (is_quota or is_connection):
+                raise  # Other non-transient errors surface immediately
+
+            last_exception = e
+            if is_connection:
+                print(f"\n[LLMManager] Connection error on attempt {attempt}/{max_attempts}. "
+                      "Checking alternative pool slots...")
+            else:
+                print(f"\n[LLMManager] Attempt {attempt}/{max_attempts} hit rate limit. Rotating slot...")
+
+            wait = min(BACKOFF_BASE_SECS * (2 ** (attempt - 1)), BACKOFF_MAX_SECS)
+            if is_connection:
+                wait = 10  # Short wait for network reconnection
+
+            jitter = random.randint(2, 8)
+            total_wait = wait + jitter
+
+            print(f"[LLMManager] Pausing {total_wait}s before retry across pool (attempt {attempt}/{max_attempts})...")
+            time.sleep(total_wait)
+
+    raise RuntimeError(
+        f"All {max_attempts} attempts failed across the LLM pool. "
+        f"Last error: {last_exception}"
+    )
 
 
 # Backwards compatibility alias

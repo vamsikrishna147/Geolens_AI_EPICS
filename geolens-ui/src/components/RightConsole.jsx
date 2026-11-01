@@ -112,7 +112,7 @@ export default function RightConsole() {
   const openTimeLens = useCallback(() => window.dispatchEvent(new CustomEvent('show-timelens')), []);
 
   return (
-    <aside className="w-72 bg-mc-panel/95 backdrop-blur-md border border-mc-border rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] flex flex-col h-full overflow-hidden">
+    <aside className="w-72 bg-mc-panel/95 backdrop-blur-md border border-mc-border rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] flex flex-col h-full overflow-hidden" data-tour="console">
 
       {/* Tab selector */}
       <div className="flex shrink-0 p-1 m-3 mb-2 bg-mc-bg rounded-lg border border-mc-border">
@@ -152,7 +152,7 @@ export default function RightConsole() {
 
           {/* Post-completion actions */}
           {allComplete && (
-            <div className="flex flex-col gap-2 mt-4 animate-in fade-in slide-in- duration-300 shrink-0">
+            <div className="flex flex-col gap-2 mt-4 animate-in fade-in slide-in-from-bottom-2 duration-300 shrink-0">
               <button
                 onClick={openReport}
                 className="w-full py-2.5 px-4 rounded-lg skeuo-button-primary font-mono text-xs tracking-wider font-semibold flex items-center justify-center gap-2"

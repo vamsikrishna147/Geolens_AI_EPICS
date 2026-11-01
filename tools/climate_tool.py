@@ -25,6 +25,7 @@ class ClimateToolInput(BaseModel):
     location: str = Field(..., description="Location name, e.g. 'Hyderabad, India'")
     start_date: Optional[str] = Field(None, description="Start date YYYY-MM-DD. Default: 30 days ago.")
     end_date: Optional[str] = Field(None, description="End date YYYY-MM-DD. Default: yesterday.")
+    year: Optional[int] = Field(None, description="Target calendar year (alternative to start_date/end_date).")
     parameters: Optional[str] = Field(
         "T2M,PRECTOTCORR,RH2M,WS10M,ALLSKY_SFC_SW_DWN",
         description=(
@@ -61,14 +62,19 @@ class ClimateTool(BaseTool):
         location: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        year: Optional[int] = None,
         parameters: Optional[str] = None,
         query_id: str = "",
     ) -> str:
         today = datetime.now()
-        if not end_date:
-            end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
-        if not start_date:
-            start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+        if year and not start_date:
+            start_date = f"{year}-01-01"
+            end_date = f"{year}-12-31" if year < today.year else (today - timedelta(days=2)).strftime("%Y-%m-%d")
+        else:
+            if not end_date:
+                end_date = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+            if not start_date:
+                start_date = (today - timedelta(days=32)).strftime("%Y-%m-%d")
         if not parameters:
             parameters = "T2M,PRECTOTCORR,RH2M,WS10M,ALLSKY_SFC_SW_DWN"
 

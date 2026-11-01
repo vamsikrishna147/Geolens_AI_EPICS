@@ -25,6 +25,8 @@ data/
 .pytest_cache/
 geocode_cache.json
 *.log
+workspace/crewai_storage/
+
 
 # OS generated files
 .DS_Store

@@ -112,11 +112,303 @@ function generateSatellitePoints(satellites, countryLat = 20, countryLng = 78) {
   });
 }
 
+function normalizeLatLng(valA, valB) {
+  if (typeof valA !== 'number' || typeof valB !== 'number' || isNaN(valA) || isNaN(valB)) {
+    return null;
+  }
+  let lng = valA;
+  let lat = valB;
+
+  // If valA is clearly outside latitude range [-90, 90], it MUST be longitude
+  if ((valA < -90 || valA > 90) && (valB >= -90 && valB <= 90)) {
+    lng = valA;
+    lat = valB;
+  }
+  // If valB is clearly outside latitude range [-90, 90], it MUST be longitude
+  else if ((valB < -90 || valB > 90) && (valA >= -90 && valA <= 90)) {
+    lng = valB;
+    lat = valA;
+  }
+  // Otherwise, default to standard GeoJSON RFC 7946: [lng, lat]
+  else {
+    lng = valA;
+    lat = valB;
+  }
+
+  // Final sanity clamp:
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
+
+function extractCenterCoords(geom) {
+  if (!geom || !geom.coordinates) return null;
+  const { type, coordinates } = geom;
+
+  // Case 1: Point -> [x, y]
+  if (type === 'Point' || (Array.isArray(coordinates) && typeof coordinates[0] === 'number')) {
+    return normalizeLatLng(coordinates[0], coordinates[1]);
+  }
+
+  // Case 2: MultiPoint, LineString, Polygon, MultiPolygon
+  let points = [];
+  if (Array.isArray(coordinates)) {
+    if (Array.isArray(coordinates[0])) {
+      if (Array.isArray(coordinates[0][0])) {
+        if (Array.isArray(coordinates[0][0][0])) {
+          // MultiPolygon
+          points = coordinates[0][0];
+        } else {
+          // Polygon ring
+          points = coordinates[0];
+        }
+      } else {
+        // LineString or MultiPoint
+        points = coordinates;
+      }
+    }
+  }
+
+  if (!points || points.length === 0) return null;
+
+  let sumA = 0;
+  let sumB = 0;
+  let validCount = 0;
+  const step = Math.max(1, Math.floor(points.length / 50));
+  for (let i = 0; i < points.length; i += step) {
+    const pt = points[i];
+    if (Array.isArray(pt) && typeof pt[0] === 'number' && typeof pt[1] === 'number') {
+      sumA += pt[0];
+      sumB += pt[1];
+      validCount++;
+    }
+  }
+
+  if (validCount === 0) return null;
+  return normalizeLatLng(sumA / validCount, sumB / validCount);
+}
+
+const CURATED_EVENTS = [
+  // ── Floods ──
+  {
+    id: 'curated-flood-valencia',
+    title: 'Valencia Catastrophic Flash Flood, Spain',
+    lat: 39.4699,
+    lng: -0.3763,
+    color: '#3B82F6',
+    category: 'floods',
+    year: 2024,
+  },
+  {
+    id: 'curated-flood-brazil',
+    title: 'Rio Grande do Sul Historic Flood Inundation, Brazil',
+    lat: -29.9348,
+    lng: -51.1852,
+    color: '#3B82F6',
+    category: 'floods',
+    year: 2024,
+  },
+  {
+    id: 'curated-flood-thailand',
+    title: 'Chao Phraya River Basin Monsoon Inundation, Thailand',
+    lat: 14.3532,
+    lng: 100.5684,
+    color: '#3B82F6',
+    category: 'floods',
+    year: 2024,
+  },
+  {
+    id: 'curated-flood-dubai',
+    title: 'Dubai Desert Flash Flood & Urban Deluge, UAE',
+    lat: 25.2048,
+    lng: 55.2708,
+    color: '#3B82F6',
+    category: 'floods',
+    year: 2024,
+  },
+  {
+    id: 'curated-flood-texas',
+    title: 'Southeast Texas Riverine Flooding, USA',
+    lat: 29.7604,
+    lng: -95.3698,
+    color: '#3B82F6',
+    category: 'floods',
+    year: 2024,
+  },
+  {
+    id: 'curated-flood-kerala',
+    title: 'Wayanad & Kerala Inundation & Landslide Zone, India',
+    lat: 11.6854,
+    lng: 76.1320,
+    color: '#3B82F6',
+    category: 'floods',
+    year: 2024,
+  },
+  {
+    id: 'curated-flood-germany',
+    title: 'Bavaria & Danube Basin Inundation, Southern Germany',
+    lat: 48.7758,
+    lng: 11.4305,
+    color: '#3B82F6',
+    category: 'floods',
+    year: 2024,
+  },
+
+  // ── Volcanoes ──
+  {
+    id: 'curated-volcano-reykjanes',
+    title: 'Sundhnúkur Fissure Eruption, Reykjanes Peninsula, Iceland',
+    lat: 63.8794,
+    lng: -22.3912,
+    color: '#F97316',
+    category: 'volcanoes',
+    year: 2024,
+  },
+  {
+    id: 'curated-volcano-etna',
+    title: 'Mount Etna Summit Crater Eruption, Sicily, Italy',
+    lat: 37.7510,
+    lng: 14.9934,
+    color: '#F97316',
+    category: 'volcanoes',
+    year: 2024,
+  },
+  {
+    id: 'curated-volcano-kilauea',
+    title: 'Kīlauea Halemaʻumaʻu Crater Eruption, Hawaii, USA',
+    lat: 19.4211,
+    lng: -155.2868,
+    color: '#F97316',
+    category: 'volcanoes',
+    year: 2024,
+  },
+  {
+    id: 'curated-volcano-lewotobi',
+    title: 'Mount Lewotobi Laki-laki Volcanic Eruption, Flores, Indonesia',
+    lat: -8.5389,
+    lng: 122.7750,
+    color: '#F97316',
+    category: 'volcanoes',
+    year: 2024,
+  },
+  {
+    id: 'curated-volcano-marapi',
+    title: 'Marapi Ash Column Eruption, West Sumatra, Indonesia',
+    lat: -0.3811,
+    lng: 100.4739,
+    color: '#F97316',
+    category: 'volcanoes',
+    year: 2023,
+  },
+  {
+    id: 'curated-volcano-sakurajima',
+    title: 'Sakurajima Showa Crater Explosive Activity, Japan',
+    lat: 31.5856,
+    lng: 130.6575,
+    color: '#F97316',
+    category: 'volcanoes',
+    year: 2024,
+  },
+  {
+    id: 'curated-volcano-popocatepetl',
+    title: 'Popocatépetl Pyroclastic & Fumarolic Activity, Mexico',
+    lat: 19.0228,
+    lng: -98.6278,
+    color: '#F97316',
+    category: 'volcanoes',
+    year: 2023,
+  },
+  {
+    id: 'curated-volcano-fuego',
+    title: 'Volcán de Fuego Lava Flow & Pyroclastic Activity, Guatemala',
+    lat: 14.4747,
+    lng: -90.8808,
+    color: '#F97316',
+    category: 'volcanoes',
+    year: 2023,
+  },
+
+  // ── Severe Storms ──
+  {
+    id: 'curated-storm-milton',
+    title: 'Hurricane Milton Gulf Coast Surge, Florida, USA',
+    lat: 27.5000,
+    lng: -82.6000,
+    color: '#06B6D4',
+    category: 'severeStorms',
+    year: 2024,
+  },
+  {
+    id: 'curated-storm-helene',
+    title: 'Hurricane Helene Inland Flash Deluge, Southern Appalachia, USA',
+    lat: 35.5951,
+    lng: -82.5515,
+    color: '#06B6D4',
+    category: 'severeStorms',
+    year: 2024,
+  },
+  {
+    id: 'curated-storm-yagi',
+    title: 'Typhoon Yagi Coastal Impact Zone, Vietnam & Hainan',
+    lat: 20.8449,
+    lng: 106.6881,
+    color: '#06B6D4',
+    category: 'severeStorms',
+    year: 2024,
+  },
+  {
+    id: 'curated-storm-remal',
+    title: 'Severe Cyclonic Storm Remal, Bay of Bengal & Sundarbans',
+    lat: 21.9000,
+    lng: 89.2000,
+    color: '#06B6D4',
+    category: 'severeStorms',
+    year: 2024,
+  },
+
+  // ── Wildfires ──
+  {
+    id: 'curated-fire-jasper',
+    title: 'Jasper National Park Complex Wildfire, Alberta, Canada',
+    lat: 52.8737,
+    lng: -118.0814,
+    color: '#EF4444',
+    category: 'wildfires',
+    year: 2024,
+  },
+  {
+    id: 'curated-fire-park',
+    title: 'Park Wildfire Mega-Fire Perimeter, California, USA',
+    lat: 40.0635,
+    lng: -121.7583,
+    color: '#EF4444',
+    category: 'wildfires',
+    year: 2024,
+  },
+  {
+    id: 'curated-fire-pantanal',
+    title: 'Pantanal Biome Wetland Mega-Fire, Mato Grosso, Brazil',
+    lat: -17.5000,
+    lng: -56.8000,
+    color: '#EF4444',
+    category: 'wildfires',
+    year: 2024,
+  },
+  {
+    id: 'curated-fire-athens',
+    title: 'Northeastern Attica Suburban Wildfire, Greece',
+    lat: 38.1500,
+    lng: 23.8500,
+    color: '#EF4444',
+    category: 'wildfires',
+    year: 2024,
+  },
+];
+
 export default function GlobeBackground() {
   const globeEl = useRef(null);
   const globeInstance = useRef(null);
-  const eventsData = useRef([]);
-  const [eventsCount, setEventsCount] = useState(0);
+  const eventsData = useRef(CURATED_EVENTS);
+  const [eventsCount, setEventsCount] = useState(CURATED_EVENTS.length);
   const [selectedCountry, setSelectedCountry] = useState(null);
   const selectedCountryRef = useRef(null);
   const [showEvents, setShowEvents] = useState(true);
@@ -126,7 +418,7 @@ export default function GlobeBackground() {
   const [eonetSearch, setEonetSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [showEventDrawer, setShowEventDrawer] = useState(false);
-  const [allEvents, setAllEvents] = useState([]);
+  const [allEvents, setAllEvents] = useState(CURATED_EVENTS);
   const { executeDirective } = useMission();
   const executeRef = useRef(executeDirective);
 
@@ -148,13 +440,72 @@ export default function GlobeBackground() {
 
   const handleOpenTimeLens = (ev) => {
     if (!ev) return;
+    const presentYear = 2026;
+    const cleanTitle = ev.title || `Natural Disaster (${ev.lat.toFixed(4)}, ${ev.lng.toFixed(4)})`;
+
+    // Accurate T1 (year the disaster happened) & T2 (present year 2026)
+    let t1Year = ev.year;
+    if (!t1Year && ev.date) {
+      try {
+        const parsedYear = new Date(ev.date).getFullYear();
+        if (!isNaN(parsedYear) && parsedYear >= 2016 && parsedYear <= presentYear) {
+          t1Year = parsedYear;
+        }
+      } catch (_) {}
+    }
+    // If not specified or if the event occurred in the present year 2026, set t1 to baseline 2024
+    // so before-and-after comparison is distinct and scientifically valid
+    if (!t1Year || t1Year >= presentYear) {
+      t1Year = 2024;
+    }
+    const t2Year = presentYear; // Always the present year 2026
+
+    // 1. Instantly orient 3D globe camera directly to this disaster coordinate
+    setSelectedEvent(ev);
+    if (globeInstance.current) {
+      globeInstance.current.pointOfView({ lat: ev.lat, lng: ev.lng, altitude: 0.65 }, 1000);
+    }
+
+    // 2. Persist active context so TimeLens mounts with exact target coordinates, location, and accurate years
+    const newContext = {
+      searchQuery: cleanTitle,
+      resolvedLocation: `${cleanTitle} (${ev.lat.toFixed(4)}°, ${ev.lng.toFixed(4)}°)`,
+      yearBefore: String(t1Year),
+      yearAfter: String(t2Year),
+      mapCenter: [ev.lat, ev.lng],
+      mapZoom: 12,
+      activeTab: 'imagery',
+      imgBefore: null,
+      imgAfter: null,
+      targetEvent: {
+        id: ev.id,
+        title: cleanTitle,
+        lat: ev.lat,
+        lng: ev.lng,
+        category: ev.category,
+        yearBefore: String(t1Year),
+        yearAfter: String(t2Year)
+      }
+    };
+
     try {
-      const currentYear = new Date().getFullYear();
-      sessionStorage.setItem('geolens_timelens_search', `${ev.title} (${ev.lat.toFixed(4)}, ${ev.lng.toFixed(4)})`);
-      sessionStorage.setItem('geolens_timelens_year_before', String(currentYear - 2));
-      sessionStorage.setItem('geolens_timelens_year_after', String(currentYear));
+      sessionStorage.setItem('geolens_timelens_active_context', JSON.stringify(newContext));
+      sessionStorage.setItem('geolens_timelens_search', cleanTitle);
+      sessionStorage.setItem('geolens_timelens_year_before', String(t1Year));
+      sessionStorage.setItem('geolens_timelens_year_after', String(t2Year));
     } catch (_) {}
-    window.dispatchEvent(new CustomEvent('show-timelens'));
+
+    // 3. Dispatch show-timelens event with full event coordinates & accurate years payload
+    window.dispatchEvent(new CustomEvent('show-timelens', {
+      detail: {
+        title: cleanTitle,
+        lat: ev.lat,
+        lng: ev.lng,
+        category: ev.category,
+        yearBefore: String(t1Year),
+        yearAfter: String(t2Year)
+      }
+    }));
   };
 
   const handleFlyToEvent = (ev) => {
@@ -166,7 +517,22 @@ export default function GlobeBackground() {
 
   const filteredEvents = useMemo(() => {
     return allEvents.filter(ev => {
-      const matchCat = categoryFilter === 'all' || ev.category.toLowerCase() === categoryFilter.toLowerCase();
+      let matchCat = categoryFilter === 'all';
+      if (!matchCat) {
+        const cat = (ev.category || '').toLowerCase();
+        const title = (ev.title || '').toLowerCase();
+        if (categoryFilter === 'wildfires') {
+          matchCat = cat === 'wildfires' || cat.includes('fire') || title.includes('fire') || title.includes('wildfire') || title.includes('burn');
+        } else if (categoryFilter === 'severeStorms') {
+          matchCat = cat === 'severestorms' || cat.includes('storm') || title.includes('storm') || title.includes('cyclone') || title.includes('typhoon') || title.includes('hurricane');
+        } else if (categoryFilter === 'floods') {
+          matchCat = cat === 'floods' || cat.includes('flood') || title.includes('flood') || title.includes('inundat') || title.includes('water');
+        } else if (categoryFilter === 'volcanoes') {
+          matchCat = cat === 'volcanoes' || cat.includes('volcan') || title.includes('volcano') || title.includes('erupt');
+        } else {
+          matchCat = cat === categoryFilter.toLowerCase();
+        }
+      }
       const matchSearch = !eonetSearch.trim() || ev.title.toLowerCase().includes(eonetSearch.toLowerCase());
       return matchCat && matchSearch;
     });
@@ -184,12 +550,13 @@ export default function GlobeBackground() {
     }
   }, [selectedCountry]);
 
-  // Toggle NASA EONET events dynamically
+  // Dynamically update NASA EONET markers on 3D globe based on visibility toggle and active category filter
   useEffect(() => {
     if (globeInstance.current) {
-      globeInstance.current.htmlElementsData(showEvents ? eventsData.current : []);
+      const markers = showEvents ? filteredEvents : [];
+      globeInstance.current.htmlElementsData(markers);
     }
-  }, [showEvents]);
+  }, [showEvents, filteredEvents]);
 
   useEffect(() => {
     if (!globeEl.current) return;
@@ -281,22 +648,90 @@ export default function GlobeBackground() {
         })
         .catch(err => console.warn('Country polygons failed to load:', err));
 
-      // ── 2. Fetch Live NASA EONET Events (Crisp Solid Dots, Zero Glow) ────
-      fetch('https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=500')
-        .then(res => res.json())
-        .then(data => {
-          if (!data?.events) return;
-          const rawEvents = data.events.map(ev => {
+      // ── 2. Configure Globe Marker Visuals & Fast Initial Mount ────────
+      globe
+        .htmlElementsData(showEvents ? CURATED_EVENTS : [])
+        .htmlElement(d => {
+          const el = document.createElement('div');
+          el.className = 'eonet-marker group relative cursor-pointer';
+          el.style.width = '12px';
+          el.style.height = '12px';
+          el.style.display = 'flex';
+          el.style.alignItems = 'center';
+          el.style.justifyContent = 'center';
+          el.style.pointerEvents = 'auto';
+
+          // Clean solid dot — ZERO glow, crisp border
+          el.innerHTML = `
+            <div style="width: 5.5px; height: 5.5px; border-radius: 50%; background-color: ${d.color}; border: 1px solid rgba(0,0,0,0.8); transition: transform 0.15s ease;" class="group-hover:scale-150"></div>
+            <div class="absolute left-4 whitespace-nowrap bg-mc-panel text-mc-text font-mono text-[10px] px-2.5 py-1 rounded-md border border-mc-border opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 shadow-lg">
+              ${d.title}
+            </div>
+          `;
+          el.onclick = () => {
+            if (setSelectedEventRef.current) {
+              setSelectedEventRef.current(d);
+            }
+            if (globeInstance.current) {
+              globeInstance.current.pointOfView({ lat: d.lat, lng: d.lng, altitude: 0.65 }, 1000);
+            }
+          };
+          return el;
+        });
+
+      // ── 3. Fetch Live NASA EONET Events Across All Natural Disaster Categories ────
+      const eonetEndpoints = [
+        'https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=120',
+        'https://eonet.gsfc.nasa.gov/api/v3/categories/floods?status=all&limit=35',
+        'https://eonet.gsfc.nasa.gov/api/v3/categories/volcanoes?status=all&limit=35',
+        'https://eonet.gsfc.nasa.gov/api/v3/categories/severeStorms?status=all&limit=25'
+      ];
+
+      Promise.allSettled(
+        eonetEndpoints.map(url =>
+          fetch(url)
+            .then(res => {
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              return res.json();
+            })
+            .then(data => data?.events || [])
+            .catch(err => {
+              console.warn(`NASA EONET endpoint warning for ${url}:`, err);
+              return [];
+            })
+        )
+      )
+        .then(results => {
+          const fetchedEvents = [];
+          for (const res of results) {
+            if (res.status === 'fulfilled' && Array.isArray(res.value)) {
+              fetchedEvents.push(...res.value);
+            }
+          }
+
+          const parsedEvents = fetchedEvents.map(ev => {
             try {
               if (!ev?.geometry?.length) return null;
               const geom = ev.geometry[ev.geometry.length - 1];
-              const coords = geom.coordinates;
+              const coords = extractCenterCoords(geom);
               if (!coords) return null;
-              const lng = Array.isArray(coords[0]) ? coords[0][0] : coords[0];
-              const lat = Array.isArray(coords[0]) ? coords[0][1] : coords[1];
-              if (typeof lng !== 'number' || typeof lat !== 'number') return null;
 
-              const category = ev.categories?.[0]?.id || 'unknown';
+              let category = ev.categories?.[0]?.id || 'unknown';
+              const titleLower = (ev.title || '').toLowerCase();
+              const catLower = category.toLowerCase();
+
+              if (catLower.includes('flood') || titleLower.includes('flood') || titleLower.includes('inundat')) {
+                category = 'floods';
+              } else if (catLower.includes('volcan') || titleLower.includes('volcan') || titleLower.includes('erupt')) {
+                category = 'volcanoes';
+              } else if (catLower.includes('storm') || titleLower.includes('storm') || titleLower.includes('cyclone') || titleLower.includes('typhoon') || titleLower.includes('hurricane')) {
+                category = 'severeStorms';
+              } else if (catLower.includes('fire') || titleLower.includes('fire') || titleLower.includes('wildfire') || titleLower.includes('burn')) {
+                category = 'wildfires';
+              } else if (catLower.includes('ice') || titleLower.includes('ice')) {
+                category = 'seaLakeIce';
+              }
+
               let color = '#F59E0B'; // Amber default
               if (category === 'wildfires') color = '#EF4444'; // Red
               if (category === 'severeStorms') color = '#06B6D4'; // Cyan
@@ -304,60 +739,77 @@ export default function GlobeBackground() {
               if (category === 'volcanoes') color = '#F97316'; // Orange
               if (category === 'seaLakeIce') color = '#E2E8F0'; // Ice white
 
-              return { id: ev.id, title: ev.title, lat, lng, color, category };
-            } catch { return null; }
+              // Extract the year the event happened
+              const eventDateStr = geom?.date || ev.geometry?.[0]?.date || ev.date || null;
+              let eventYear = 2024;
+              if (eventDateStr) {
+                try {
+                  const y = new Date(eventDateStr).getFullYear();
+                  if (!isNaN(y) && y >= 2015 && y <= 2026) {
+                    eventYear = y;
+                  }
+                } catch (_) {}
+              }
+              if (ev.title) {
+                const yrMatch = ev.title.match(/\b(20[12][0-9])\b/);
+                if (yrMatch) {
+                  eventYear = parseInt(yrMatch[1], 10);
+                }
+              }
+
+              return {
+                id: String(ev.id || `${category}-${coords.lat.toFixed(2)}-${coords.lng.toFixed(2)}`),
+                title: ev.title || 'Unlabeled Natural Event',
+                lat: coords.lat,
+                lng: coords.lng,
+                color,
+                category,
+                year: eventYear,
+                date: eventDateStr
+              };
+            } catch {
+              return null;
+            }
           }).filter(Boolean);
 
-          // Spatial deduplication: prevent dense clustering into blurry blobs
-          const seenGrid = new Set();
-          const events = [];
-          for (const ev of rawEvents) {
-            // Bucket to ~1.2 degrees (~130 km) grid to ensure distinct, clean markers
-            const gridKey = `${ev.category}_${Math.round(ev.lat / 1.2)}_${Math.round(ev.lng / 1.2)}`;
-            if (!seenGrid.has(gridKey)) {
-              seenGrid.add(gridKey);
-              events.push(ev);
+          // Combine with curated events to guarantee that every disaster type has verified entries
+          const allCandidates = [...parsedEvents, ...CURATED_EVENTS];
+
+          // Deduplicate and balance across categories to prevent wildfires from dominating
+          const seenIds = new Set();
+          const catCounts = { wildfires: 0, severeStorms: 0, floods: 0, volcanoes: 0, seaLakeIce: 0, other: 0 };
+          const maxPerCat = { wildfires: 45, severeStorms: 30, floods: 35, volcanoes: 35, seaLakeIce: 10, other: 15 };
+          const balancedEvents = [];
+
+          for (const ev of allCandidates) {
+            if (!ev || seenIds.has(ev.id)) continue;
+            seenIds.add(ev.id);
+
+            const cat = ev.category || 'other';
+            const currentCount = catCounts[cat] || 0;
+            const limit = maxPerCat[cat] || 25;
+
+            if (currentCount < limit) {
+              catCounts[cat] = currentCount + 1;
+              balancedEvents.push(ev);
             }
-            if (events.length >= 120) break;
           }
 
-          eventsData.current = events;
-          setEventsCount(events.length);
-          setAllEvents(events);
+          eventsData.current = balancedEvents;
+          setEventsCount(balancedEvents.length);
+          setAllEvents(balancedEvents);
 
-          globe
-            .htmlElementsData(showEvents ? events : [])
-            .htmlElement(d => {
-              const el = document.createElement('div');
-              el.className = 'eonet-marker group relative cursor-pointer';
-              el.style.width = '12px';
-              el.style.height = '12px';
-              el.style.display = 'flex';
-              el.style.alignItems = 'center';
-              el.style.justifyContent = 'center';
-              el.style.pointerEvents = 'auto';
-
-              // Clean solid dot — ZERO glow, crisp border
-              el.innerHTML = `
-                <div style="width: 5.5px; height: 5.5px; border-radius: 50%; background-color: ${d.color}; border: 1px solid rgba(0,0,0,0.8); transition: transform 0.15s ease;" class="group-hover:scale-150"></div>
-                <div class="absolute left-4 whitespace-nowrap bg-mc-panel text-mc-text font-mono text-[10px] px-2.5 py-1 rounded-md border border-mc-border opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 shadow-lg">
-                  ${d.title}
-                </div>
-              `;
-              el.onclick = () => {
-                if (selectedEventRef.current && selectedEventRef.current.id === d.id) {
-                  // already selected
-                } else if (setSelectedEventRef.current) {
-                  setSelectedEventRef.current(d);
-                }
-                if (globeInstance.current) {
-                  globeInstance.current.pointOfView({ lat: d.lat, lng: d.lng, altitude: 0.65 }, 1000);
-                }
-              };
-              return el;
-            });
+          if (globeInstance.current) {
+            globeInstance.current.htmlElementsData(showEvents ? balancedEvents : []);
+          }
         })
-        .catch(err => console.error("Failed to fetch EONET data", err));
+        .catch(err => {
+          console.warn("NASA EONET fetch fallback engaged:", err);
+          // Fallback to curated events on network error
+          eventsData.current = CURATED_EVENTS;
+          setEventsCount(CURATED_EVENTS.length);
+          setAllEvents(CURATED_EVENTS);
+        });
 
       // Resize
       const handleResize = () => {
@@ -558,10 +1010,10 @@ export default function GlobeBackground() {
             <div className="flex flex-wrap gap-1">
               {[
                 { id: 'all', label: 'ALL' },
-                { id: 'wildfires', label: '🔥 Wildfire' },
-                { id: 'severeStorms', label: '🌀 Storm' },
-                { id: 'floods', label: '🌊 Flood' },
-                { id: 'volcanoes', label: '🌋 Volcano' },
+                { id: 'wildfires', label: 'Wildfire' },
+                { id: 'severeStorms', label: 'Storm' },
+                { id: 'floods', label: 'Flood' },
+                { id: 'volcanoes', label: 'Volcano' },
               ].map(cat => (
                 <button
                   key={cat.id}
@@ -608,17 +1060,23 @@ export default function GlobeBackground() {
                     {/* Inline Quick Action Buttons */}
                     <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 shrink-0">
                       <button
-                        onClick={() => handleLaunchReport(ev)}
-                        className="px-1.5 py-1 rounded bg-red-950/70 hover:bg-red-900 border border-red-500/40 text-red-300 text-[9px] font-mono font-bold flex items-center gap-0.5 cursor-pointer"
-                        title="1-Click Assessment Report"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleLaunchReport(ev);
+                        }}
+                        className="px-1.5 py-1 rounded bg-red-950/70 hover:bg-red-900 border border-red-500/40 text-red-300 text-[9px] font-mono font-bold flex items-center gap-0.5 cursor-pointer transition-colors"
+                        title={`Generate 5-Agent Mission Assessment Report for ${ev.title}`}
                       >
                         <FileText size={10} />
                         <span>RPT</span>
                       </button>
                       <button
-                        onClick={() => handleOpenTimeLens(ev)}
-                        className="px-1.5 py-1 rounded bg-mc-panel hover:bg-mc-primary hover:text-black border border-mc-border text-mc-muted text-[9px] font-mono flex items-center gap-0.5 cursor-pointer"
-                        title="Open in TimeLens"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenTimeLens(ev);
+                        }}
+                        className="px-1.5 py-1 rounded bg-mc-panel hover:bg-mc-primary hover:text-black border border-mc-border text-mc-muted text-[9px] font-mono flex items-center gap-0.5 cursor-pointer transition-colors"
+                        title={`Open TimeLens Satellite View at ${ev.title} (${ev.lat.toFixed(2)}°, ${ev.lng.toFixed(2)}°)`}
                       >
                         <Satellite size={10} />
                         <span>TL</span>
@@ -696,7 +1154,7 @@ export default function GlobeBackground() {
               ))}
             </div>
             <div className="text-[9px] text-mc-muted/70 mt-2 font-mono">
-              Click globe background or ✕ to resume rotation
+              Click globe background or close to resume rotation
             </div>
           </div>
         )}

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, Satellite, User, Settings, Monitor, Moon, Sun, LogOut, Globe, Mail, Briefcase, Database, Folder, ShieldAlert, ShieldCheck, Search, MapPin, Loader2, FileText } from 'lucide-react';
+import { Activity, Satellite, User, Settings, Monitor, Moon, Sun, LogOut, Globe, Mail, Briefcase, Database, Folder, ShieldAlert, ShieldCheck, Search, MapPin, Loader2, FileText, X } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useTheme } from '../context/ThemeContext';
 import { useMission } from '../context/MissionContext';
@@ -103,7 +103,7 @@ export default function TopBar() {
       </div>
 
       {/* Center: Interactive Target Navigator & Mission Status Omnibar (User POV) */}
-      <div className="hidden md:flex items-center justify-center flex-1 max-w-md lg:max-w-lg mx-3 lg:mx-6 relative" ref={searchRef}>
+      <div className="hidden md:flex items-center justify-center flex-1 max-w-md lg:max-w-lg mx-3 lg:mx-6 relative" ref={searchRef} data-tour="omnibar">
         {isExecuting ? (
           /* Live Mission Status Pill when running */
           <div className="flex items-center gap-2.5 px-4 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 font-mono text-xs shadow-sm w-full justify-center animate-pulse">
@@ -148,10 +148,10 @@ export default function TopBar() {
                 <button
                   type="button"
                   onClick={() => { setSearchQuery(''); setSuggestions([]); }}
-                  className="text-mc-muted hover:text-white px-1 cursor-pointer text-xs"
+                  className="text-mc-muted hover:text-white p-0.5 cursor-pointer text-xs"
                   title="Clear search"
                 >
-                  ✕
+                  <X size={12} />
                 </button>
               ) : (
                 <kbd className="hidden lg:inline px-1.5 py-0.5 text-[9px] font-mono text-mc-muted bg-mc-bg/80 border border-mc-border/80 rounded">
@@ -269,6 +269,13 @@ export default function TopBar() {
                 className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 ${theme === 'light' ? 'dropdown-item active' : 'dropdown-item'}`}
               >
                 <Sun size={14} /> Light Mode
+              </button>
+              <div className="my-1 border-t border-mc-border" />
+              <button 
+                onClick={() => { setShowSettings(false); window.dispatchEvent(new CustomEvent('start-demo-tour')); }}
+                className="dropdown-item w-full text-left px-3 py-2 text-sm flex items-center gap-2"
+              >
+                <Activity size={14} className="text-mc-primary" /> Start Product Tour
               </button>
             </div>
           )}

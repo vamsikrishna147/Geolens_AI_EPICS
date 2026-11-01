@@ -67,21 +67,53 @@ class MapGenerator:
         self.map = folium.Map(
             location=[center_lat, center_lon],
             zoom_start=zoom,
-            tiles="CartoDB dark_matter",
+            tiles=None,
             control_scale=True,
         )
         
-        # Add stunning basemaps for evaluators
+        # Primary Basemap: High-Resolution Satellite (Keyless & Authentic)
         folium.TileLayer(
             tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            attr='Esri',
+            attr='Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
             name='Esri Satellite',
             overlay=False,
             control=True
         ).add_to(self.map)
         
-        folium.TileLayer('OpenStreetMap').add_to(self.map)
-        folium.TileLayer('CartoDB positron', name='CartoDB Light').add_to(self.map)
+        # Tactical Dark Gray Canvas (Clean, zero watermark, keyless)
+        folium.TileLayer(
+            tiles='https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+            attr='Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+            name='Dark Matter Canvas',
+            overlay=False,
+            control=True
+        ).add_to(self.map)
+
+        # Standard OpenStreetMap
+        folium.TileLayer(
+            tiles='OpenStreetMap',
+            name='OpenStreetMap',
+            overlay=False,
+            control=True
+        ).add_to(self.map)
+
+        # Clean Light Canvas (Keyless)
+        folium.TileLayer(
+            tiles='https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+            attr='Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+            name='Light Canvas',
+            overlay=False,
+            control=True
+        ).add_to(self.map)
+
+        # Topographic Terrain
+        folium.TileLayer(
+            tiles='https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+            attr='Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap (CC-BY-SA)',
+            name='Topographic Terrain',
+            overlay=False,
+            control=True
+        ).add_to(self.map)
 
         # Inject a custom page title and some custom CSS for the map
         self.map.get_root().html.add_child(
@@ -305,7 +337,7 @@ class MapGenerator:
 
         self.map.save(output_path)
         abs_path = os.path.abspath(output_path)
-        print(f"[MapGenerator] Map saved → {abs_path}")
+        print(f"[MapGenerator] Map saved -> {abs_path}")
         return abs_path
 
     # ------------------------------------------------------------------

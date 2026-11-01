@@ -6,7 +6,20 @@ Pipeline:
 """
 
 import os
+from pathlib import Path
 from typing import Optional
+
+# Sandbox and offline isolation for CrewAI local caches
+_workspace_crewai = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "workspace", "crewai_storage"))
+os.makedirs(_workspace_crewai, exist_ok=True)
+os.environ.setdefault("CREWAI_STORAGE_DIR", _workspace_crewai)
+os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
+
+try:
+    import crewai_core.token_manager as _tm
+    _tm.TokenManager._get_secure_storage_path = lambda self: Path(_workspace_crewai)
+except Exception:
+    pass
 
 from crewai import Agent, Crew, LLM, Process, Task
 from pydantic import BaseModel, Field

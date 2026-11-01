@@ -29,20 +29,6 @@ function AppContent({ initialTab = TAB_MISSION, initialReport = false }) {
   const [showTimeLens, setShowTimeLens] = useState(false);
   const [mapInitialParams, setMapInitialParams] = useState(null);
   const [showMobileConsole, setShowMobileConsole] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(() => {
-    try {
-      return localStorage.getItem('geolens_onboarding_dismissed') !== 'true';
-    } catch (_) {
-      return true;
-    }
-  });
-
-  const dismissOnboarding = () => {
-    setShowOnboarding(false);
-    try {
-      localStorage.setItem('geolens_onboarding_dismissed', 'true');
-    } catch (_) {}
-  };
 
   // Listen for events fired by RightConsole post-mission buttons and BottomCommand
   React.useEffect(() => {
@@ -83,7 +69,7 @@ function AppContent({ initialTab = TAB_MISSION, initialReport = false }) {
       <LeftNav activeTab={activeTab} onTabChange={handleTabChange} />
 
       {/* ── 3D Globe Background (always visible in background) ── */}
-      <div className="absolute inset-0 z-0">
+      <div className="absolute inset-0 z-0" data-tour="globe">
         <GlobeBackground />
       </div>
 
@@ -121,27 +107,6 @@ function AppContent({ initialTab = TAB_MISSION, initialReport = false }) {
           <TopBar />
         </div>
 
-        {/* ── First-Visit Onboarding Guide Banner (Dismissible) ── */}
-        {isMission && showOnboarding && (
-          <div className="pointer-events-auto mx-auto mt-2 max-w-3xl w-[94%] px-2 z-40 animate-in fade-in slide-in-from-top-2">
-            <div className="bg-mc-panel/95 backdrop-blur-md border border-mc-primary/40 rounded-xl px-4 py-2 flex items-center justify-between gap-3 shadow-xl">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span className="w-2 h-2 rounded-full bg-mc-primary animate-pulse shrink-0" />
-                <span className="font-mono text-[11px] text-mc-text leading-snug">
-                  <strong className="text-mc-primary font-bold">Quick Start:</strong> Press <kbd className="px-1.5 py-0.5 rounded bg-mc-bg border border-mc-border text-[10px] text-mc-primary font-bold">Ctrl+K</kbd> to fly anywhere, click any natural disaster pin on the globe, or enter your mission directive below.
-                </span>
-              </div>
-              <button
-                onClick={dismissOnboarding}
-                className="p-1 rounded-md text-mc-muted hover:text-white transition-colors cursor-pointer shrink-0 ml-2"
-                title="Dismiss guide"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Middle row: Spacer + Center (globe) + RightConsole */}
         <div className="flex-1 min-h-0 flex items-stretch px-2 sm:px-4 py-2 gap-2 sm:gap-4 relative">
 
@@ -178,9 +143,10 @@ function AppContent({ initialTab = TAB_MISSION, initialReport = false }) {
                 <span className="font-heading text-xs font-bold text-mc-text uppercase">Mission Intelligence</span>
                 <button 
                   onClick={() => setShowMobileConsole(false)} 
-                  className="text-mc-muted hover:text-white px-2 py-1 rounded bg-mc-bg border border-mc-border text-xs"
+                  className="text-mc-muted hover:text-white p-1 rounded bg-mc-bg border border-mc-border text-xs cursor-pointer"
+                  title="Close Console"
                 >
-                  ✕
+                  <X size={14} />
                 </button>
               </div>
               <div className="flex-1 overflow-hidden">

@@ -90,7 +90,7 @@ function MapFlyController({ center, zoom }) {
   return null;
 }
 
-function DrawingManager({ isDrawing, bounds, setBounds, setIsDrawing }) {
+function DrawingManager({ isDrawing, bounds, setBounds, setIsDrawing, onBoundsDrawn }) {
   const map        = useMap();
   const [anchor, setAnchor]   = useState(null);
   const [dragging, setDragging] = useState(false);
@@ -103,7 +103,16 @@ function DrawingManager({ isDrawing, bounds, setBounds, setIsDrawing }) {
   useMapEvents({
     mousedown(e) { if (!isDrawing) return; setAnchor(e.latlng); setDragging(true); setBounds(null); },
     mousemove(e) { if (!isDrawing || !dragging || !anchor) return; setBounds(L.latLngBounds(anchor, e.latlng)); },
-    mouseup()    { if (!isDrawing || !dragging) return; setDragging(false); setIsDrawing(false); },
+    mouseup(e)    { 
+      if (!isDrawing || !dragging) return; 
+      setDragging(false); 
+      setIsDrawing(false); 
+      if (anchor && e.latlng) {
+        const finalBounds = L.latLngBounds(anchor, e.latlng);
+        setBounds(finalBounds);
+        if (onBoundsDrawn) onBoundsDrawn(finalBounds);
+      }
+    },
   });
 
   return bounds
@@ -231,6 +240,10 @@ export default function MapLayersView({ onBack, initialParams }) {
 
   // Nearby targets
   const [nearbyTargets, setNearbyTargets] = useState([]);
+  const [showNearbyTargets, setShowNearbyTargets] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 768);
+  const [showBaseMapPanel, setShowBaseMapPanel] = useState(() => 
+    typeof window !== 'undefined' ? window.innerWidth >= 1024 : false
+  );
 
   // ── Ruler Tool State ────────────────────────────────────────────────
   const [rulerActive, setRulerActive]     = useState(false);
@@ -305,8 +318,34 @@ export default function MapLayersView({ onBack, initialParams }) {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat]       = useState('png'); // 'png' | 'tif' | 'geojson'
   const [exportYear, setExportYear]           = useState('2024');
+  const [customYearInput, setCustomYearInput] = useState('');
   const [isDownloading, setIsDownloading]     = useState(false);
   const [downloadSuccess, setDownloadSuccess] = useState(null);
+  const [aoiDetails, setAoiDetails]           = useState(null);
+  const [isResolvingAoi, setIsResolvingAoi]   = useState(false);
+
+  // Reverse geocode when an AOI bounding box is drawn
+  const handleBoundsDrawn = useCallback(async (drawnBounds) => {
+    if (!drawnBounds) return;
+    try {
+      setIsResolvingAoi(true);
+      const center = drawnBounds.getCenter();
+      const res = await fetch(`${API}/api/geocoder/reverse?lat=${center.lat.toFixed(5)}&lon=${center.lng.toFixed(5)}&lang=${encodeURIComponent(language || 'en')}`);
+      if (res.ok) {
+        const data = await res.json();
+        setAoiDetails(data);
+        if (data.short_name) {
+          setPlaceName(data.short_name);
+        } else if (data.display_name) {
+          setPlaceName(data.display_name.split(',')[0]);
+        }
+      }
+    } catch (_) {
+      // Keep existing name
+    } finally {
+      setIsResolvingAoi(false);
+    }
+  }, [language]);
 
   const getAreaKm2 = (targetBounds = null) => {
     const b = targetBounds || bounds || viewportBounds;
@@ -319,6 +358,26 @@ export default function MapLayersView({ onBack, initialParams }) {
     } catch (_) {
       return '0.00';
     }
+  };
+
+  // Accurately estimate file storage size based on format, area, and sensor resolution
+  const estimateStorage = (format = exportFormat, targetBounds = null) => {
+    const area = parseFloat(getAreaKm2(targetBounds));
+    if (format === 'geojson') {
+      return '< 50 KB';
+    }
+    if (format === 'tif' || format === 'geotiff') {
+      // 16-bit multi-band or raw GeoTIFF ~ 12 MB to 85 MB depending on coverage
+      if (area < 50) return '~8.4 MB';
+      if (area < 500) return '~18.2 MB';
+      if (area < 5000) return '~42.6 MB';
+      return '~76.5 MB';
+    }
+    // High-res RGB PNG (2048x2048)
+    if (area < 100) return '~2.8 MB';
+    if (area < 1000) return '~3.9 MB';
+    if (area < 10000) return '~5.4 MB';
+    return '~6.8 MB';
   };
 
   const handleDownloadSatellite = async (format = exportFormat, year = exportYear) => {
@@ -411,6 +470,7 @@ export default function MapLayersView({ onBack, initialParams }) {
           bounds={bounds}
           setBounds={setBounds}
           setIsDrawing={setIsDrawing}
+          onBoundsDrawn={handleBoundsDrawn}
         />
         <ViewportTracker onViewportChange={setViewportBounds} />
 
@@ -504,66 +564,85 @@ export default function MapLayersView({ onBack, initialParams }) {
         )}
       </MapContainer>
 
-      {/* ── Top-left: Back + Search ── */}
-      <div className="absolute top-5 left-5 z-50 flex items-center gap-3">
+      {/* ── Top bar: Back + Search + Tools + BaseMap Toggle ── */}
+      <div className="absolute top-3 sm:top-5 left-3 sm:left-5 right-3 sm:right-auto z-50 flex items-center gap-2 sm:gap-3 max-w-full">
         <button
           onClick={onBack}
-          className="flex items-center gap-2 px-4 py-2 bg-mc-panel border border-mc-border text-mc-text font-mono text-xs rounded-md shadow-sm hover:border-mc-primary transition-colors"
+          className="flex items-center gap-1.5 px-2.5 sm:px-4 py-2 bg-mc-panel border border-mc-border text-mc-text font-mono text-xs rounded-md shadow-sm hover:border-mc-primary transition-colors shrink-0 cursor-pointer"
+          title="Back to Mission Control"
         >
-          <ArrowLeft size={15} /> MISSION CONTROL
+          <ArrowLeft size={14} />
+          <span className="hidden sm:inline">MISSION CONTROL</span>
+          <span className="sm:hidden font-bold">MC</span>
         </button>
 
-        <form onSubmit={handleSearch} className="relative w-72">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-mc-primary" size={15} />
+        <form onSubmit={handleSearch} className="relative flex-1 min-w-[120px] max-w-xs sm:w-72">
+          <Search className="absolute left-2.5 sm:left-3.5 top-1/2 -translate-y-1/2 text-mc-primary" size={14} />
           <input
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search any location…"
-            className="w-full pl-9 pr-10 py-2 bg-mc-panel text-mc-text border border-mc-border outline-none focus:border-mc-primary text-xs font-mono rounded-md shadow-sm"
+            placeholder="Search location…"
+            className="w-full pl-8 sm:pl-9 pr-8 sm:pr-10 py-1.5 sm:py-2 bg-mc-panel text-mc-text border border-mc-border outline-none focus:border-mc-primary text-xs font-mono rounded-md shadow-sm"
           />
           <button
             type="submit"
             disabled={isSearching}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-mc-muted hover:text-mc-primary transition-colors"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-mc-muted hover:text-mc-primary transition-colors cursor-pointer"
           >
             {isSearching
-              ? <Loader2 size={14} className="animate-spin text-mc-primary" />
-              : <Navigation size={14} />
+              ? <Loader2 size={13} className="animate-spin text-mc-primary" />
+              : <Navigation size={13} />
             }
           </button>
         </form>
 
+        {/* Base Map Toggle Button */}
+        <button
+          onClick={() => setShowBaseMapPanel(s => !s)}
+          className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 font-mono text-xs rounded-md shadow-sm border transition-colors shrink-0 cursor-pointer ${
+            showBaseMapPanel
+              ? 'bg-mc-primary/20 border-mc-primary text-mc-primary font-bold'
+              : 'bg-mc-panel border-mc-border text-mc-text hover:border-mc-primary'
+          }`}
+          title="Toggle Base Map Selection"
+        >
+          <MapIcon size={14} />
+          <span className="hidden md:inline">BASE MAP</span>
+        </button>
+
         {/* Ruler Tool Button */}
         <button
           onClick={handleToggleRuler}
-          className={`flex items-center gap-2 px-4 py-2 font-mono text-xs rounded-md shadow-sm border transition-colors ${
+          className={`flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 font-mono text-xs rounded-md shadow-sm border transition-colors shrink-0 cursor-pointer ${
             rulerActive
-              ? 'bg-amber-500/20 border-amber-500/50 text-mc-text'
+              ? 'bg-amber-500/20 border-amber-500/50 text-mc-text font-bold'
               : 'bg-mc-panel border-mc-border text-mc-text hover:border-mc-primary'
           }`}
           title="Distance Ruler — Click Point 1 then Point 2"
         >
-          <Ruler size={15} className="text-amber-500" />
-          {rulerActive
-            ? rulerPoints.length === 0 ? 'CLICK POINT 1'
-              : rulerPoints.length === 1 ? 'CLICK POINT 2'
-              : (rulerDistance || 'RULER')
-            : 'RULER'}
+          <Ruler size={14} className="text-amber-500" />
+          <span className="hidden md:inline">
+            {rulerActive
+              ? rulerPoints.length === 0 ? 'POINT 1'
+                : rulerPoints.length === 1 ? 'POINT 2'
+                : (rulerDistance || 'RULER')
+              : 'RULER'}
+          </span>
         </button>
 
         {/* Export Satellite Imagery Button */}
         <button
           onClick={() => setShowExportModal(true)}
-          className={`flex items-center gap-2 px-3.5 py-2 font-mono text-xs rounded-md shadow-sm border transition-colors cursor-pointer ${
+          className={`flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 font-mono text-xs rounded-md shadow-sm border transition-colors cursor-pointer shrink-0 ${
             showExportModal
               ? 'bg-mc-primary text-white border-mc-primary'
               : 'bg-mc-panel border-mc-border text-mc-text hover:border-mc-primary'
           }`}
-          title="Download high-resolution satellite imagery for active region (PNG / GeoTIFF / GeoJSON)"
+          title="Export high-resolution satellite imagery (PNG / GeoTIFF / GeoJSON)"
         >
           <Download size={14} className={showExportModal ? 'text-white' : 'text-mc-primary'} />
-          <span>EXPORT SATELLITE</span>
+          <span className="hidden md:inline">EXPORT SATELLITE</span>
         </button>
       </div>
 
@@ -597,106 +676,139 @@ export default function MapLayersView({ onBack, initialParams }) {
         </div>
       )}
 
-      {/* ── Right panel: Layer controls ── */}
-      <div className="absolute top-5 right-5 z-50 w-72 bg-mc-panel border border-mc-border rounded-md p-5 shadow-sm flex flex-col gap-5">
-
-        {/* Base Maps */}
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <MapIcon size={13} className="text-mc-muted" />
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-mc-muted">Base Map</span>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            {['Esri Satellite', 'OpenTopoMap', 'OpenStreetMap'].map(base => (
+      {/* ── Right panel: Layer controls (Toggleable) ── */}
+      {showBaseMapPanel && (
+        <>
+          <div className="fixed inset-0 z-40 md:hidden" onClick={() => setShowBaseMapPanel(false)} />
+          <div className="absolute top-16 right-3 sm:top-16 sm:right-5 z-50 w-64 sm:w-72 bg-mc-panel/98 backdrop-blur-md border border-mc-border rounded-xl p-4 sm:p-5 shadow-2xl flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center justify-between pb-2 border-b border-mc-border/50">
+              <div className="flex items-center gap-2">
+                <MapIcon size={13} className="text-mc-primary" />
+                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-mc-text font-bold">Base Map</span>
+              </div>
               <button
-                key={base}
-                onClick={() => setActiveBase(base)}
-                className={`flex items-center justify-between px-3 py-2 rounded-md border text-xs font-mono transition-colors ${
-                  activeBase === base
-                    ? 'bg-mc-primary/10 border-mc-primary text-mc-text'
-                    : 'bg-transparent border-mc-border/50 text-mc-muted hover:border-mc-border hover:text-mc-text'
-                }`}
+                onClick={() => setShowBaseMapPanel(false)}
+                className="text-mc-muted hover:text-white p-0.5 rounded cursor-pointer"
+                title="Close Base Map panel"
               >
-                {base}
-                {activeBase === base && <div className="w-1.5 h-1.5 rounded-full bg-mc-primary" />}
+                <X size={14} />
               </button>
-            ))}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {['Esri Satellite', 'OpenTopoMap', 'OpenStreetMap'].map(base => (
+                <button
+                  key={base}
+                  onClick={() => {
+                    setActiveBase(base);
+                    if (typeof window !== 'undefined' && window.innerWidth < 768) setShowBaseMapPanel(false);
+                  }}
+                  className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs font-mono transition-colors cursor-pointer ${
+                    activeBase === base
+                      ? 'bg-mc-primary/15 border-mc-primary text-mc-primary font-bold'
+                      : 'bg-transparent border-mc-border/50 text-mc-muted hover:border-mc-border hover:text-mc-text'
+                  }`}
+                >
+                  {base}
+                  {activeBase === base && <div className="w-1.5 h-1.5 rounded-full bg-mc-primary" />}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        </>
+      )}
 
-
-      </div>
-
-      {/* ── Bottom-left: Nearby targets ── */}
+      {/* ── Bottom-left: Nearby targets (Collapsible) ── */}
       {nearbyTargets.length > 0 && (
-        <div className="absolute bottom-8 left-5 z-50 w-72 bg-mc-panel border border-mc-border rounded-md p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-3 pb-2 border-b border-mc-border/50">
-            <Compass size={13} className="text-mc-primary" />
-            <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-mc-text">Nearby Targets</span>
-            <span className="ml-auto text-[9px] font-mono text-mc-muted truncate">{placeName}</span>
-          </div>
-          <div className="flex flex-col gap-1.5 max-h-44 overflow-y-auto">
-            {nearbyTargets.map((target, i) => (
+        showNearbyTargets ? (
+          <div className="absolute bottom-28 sm:bottom-8 left-3 sm:left-5 z-40 w-64 sm:w-72 max-w-[calc(100vw-2rem)] bg-mc-panel/95 backdrop-blur-md border border-mc-border rounded-xl p-3.5 sm:p-4 shadow-xl animate-in fade-in">
+            <div className="flex items-center gap-2 mb-2 pb-2 border-b border-mc-border/50">
+              <Compass size={13} className="text-mc-primary" />
+              <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-mc-text font-bold">Nearby Targets</span>
+              <span className="ml-auto text-[9px] font-mono text-mc-muted truncate max-w-[80px]">{placeName}</span>
               <button
-                key={i}
-                onClick={() => {
-                  setMapCenter([target.lat, target.lon]);
-                  setMapZoom(target.zoom || 10);
-                  // Only change the root location context if it's an actual distinct place
-                  if (target.type !== 'MACRO_VIEW' && target.type !== 'MICRO_VIEW') {
-                    setPlaceName(target.name);
-                    setNearbyTargets([]); // Will trigger refresh via useEffect
-                    setSearchQuery(target.name); // Keep search bar in sync
-                  }
-                }}
-                className="w-full text-left px-3 py-2 rounded-md bg-mc-bg/60 border border-mc-border/40 hover:border-mc-primary transition-colors flex items-center justify-between group cursor-pointer"
+                onClick={() => setShowNearbyTargets(false)}
+                className="text-mc-muted hover:text-white ml-1 p-0.5 rounded cursor-pointer"
+                title="Minimize Targets"
               >
-                <div className="min-w-0">
-                  <p className="font-mono text-xs text-mc-text group-hover:text-mc-primary transition-colors truncate">{target.name}</p>
-                  <p className="text-[9px] text-mc-muted font-mono">{target.type?.replace('_', ' ')}</p>
-                </div>
-                {target.type === 'MACRO_VIEW'
-                  ? <ZoomOut size={13} className="text-mc-muted shrink-0 ml-2" />
-                  : <ZoomIn  size={13} className="text-mc-muted shrink-0 ml-2" />
-                }
+                <X size={12} />
               </button>
-            ))}
+            </div>
+            <div className="flex flex-col gap-1.5 max-h-32 sm:max-h-44 overflow-y-auto">
+              {nearbyTargets.map((target, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    setMapCenter([target.lat, target.lon]);
+                    setMapZoom(target.zoom || 10);
+                    if (target.type !== 'MACRO_VIEW' && target.type !== 'MICRO_VIEW') {
+                      setPlaceName(target.name);
+                      setNearbyTargets([]);
+                      setSearchQuery(target.name);
+                    }
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 sm:py-2 rounded-lg bg-mc-bg/60 border border-mc-border/40 hover:border-mc-primary transition-colors flex items-center justify-between group cursor-pointer"
+                >
+                  <div className="min-w-0">
+                    <p className="font-mono text-xs text-mc-text group-hover:text-mc-primary transition-colors truncate">{target.name}</p>
+                    <p className="text-[9px] text-mc-muted font-mono">{target.type?.replace('_', ' ')}</p>
+                  </div>
+                  {target.type === 'MACRO_VIEW'
+                    ? <ZoomOut size={12} className="text-mc-muted shrink-0 ml-2" />
+                    : <ZoomIn  size={12} className="text-mc-muted shrink-0 ml-2" />
+                  }
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : (
+          <button
+            onClick={() => setShowNearbyTargets(true)}
+            className="absolute bottom-24 sm:bottom-8 left-3 sm:left-5 z-40 px-3 py-1.5 bg-mc-panel/95 backdrop-blur-md border border-mc-border hover:border-mc-primary text-mc-text font-mono text-[11px] rounded-lg shadow-lg flex items-center gap-1.5 cursor-pointer"
+            title="Expand Nearby Targets"
+          >
+            <Compass size={12} className="text-mc-primary" />
+            <span>TARGETS ({nearbyTargets.length})</span>
+          </button>
+        )
       )}
 
       {/* ── Bottom-centre: Drawing controls ── */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-3">
+      <div className="absolute bottom-4 sm:bottom-8 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 sm:gap-3 w-[calc(100%-1.5rem)] sm:w-auto">
         {bounds && (
-          <div className="flex flex-col items-center gap-2 animate-in slide-in-from-bottom-2 duration-300">
-            <div className="px-5 py-1.5 bg-mc-panel/90 backdrop-blur-md border border-mc-border rounded-md shadow-sm flex items-center gap-3">
-              <span className="text-[11px] font-mono text-mc-text tracking-wider">
+          <div className="flex flex-col items-center gap-2 animate-in slide-in-from-bottom-2 duration-300 w-full">
+            <div className="px-3 sm:px-5 py-1.5 bg-mc-panel/95 backdrop-blur-md border border-mc-border rounded-xl shadow-lg flex items-center justify-center flex-wrap gap-2 text-center">
+              <span className="text-[10px] sm:text-[11px] font-mono text-mc-text tracking-wider">
                 SELECTED AOI: <span className="text-mc-primary font-bold">{getAreaKm2()} KM²</span>
               </span>
-              <span className="text-slate-500">·</span>
-              <span className="text-[10px] font-mono text-mc-muted truncate max-w-xs">
-                {placeName || 'Target Region'}
+              <span className="text-slate-500 hidden sm:inline">·</span>
+              <span className="text-[10px] font-mono text-amber-400 font-semibold truncate max-w-xs">
+                AOI: {placeName || 'Target Region'}
+                {aoiDetails?.state ? ` (${aoiDetails.state})` : ''}
+              </span>
+              <span className="text-slate-500 hidden sm:inline">·</span>
+              <span className="text-[10px] font-mono text-mc-muted">
+                Est. Size: <strong className="text-mc-text">{estimateStorage('png')}</strong>
               </span>
             </div>
 
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center gap-2 sm:gap-2.5 flex-wrap">
               <button
                 onClick={handleAnalyze}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-md bg-mc-primary hover:bg-mc-secondary text-white font-mono text-xs font-semibold tracking-wider transition-colors shadow-sm cursor-pointer"
+                className="flex items-center gap-1.5 px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg bg-mc-primary hover:bg-mc-secondary text-white font-mono text-xs font-semibold tracking-wider transition-colors shadow-sm cursor-pointer whitespace-nowrap"
               >
-                <Play size={13} fill="currentColor" />
+                <Play size={12} fill="currentColor" />
                 ANALYZE MISSION
               </button>
 
               <button
                 onClick={() => setShowExportModal(true)}
                 disabled={isDownloading}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-semibold tracking-wider transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+                className="flex items-center gap-1.5 px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-semibold tracking-wider transition-colors shadow-sm cursor-pointer disabled:opacity-50 whitespace-nowrap"
               >
                 {isDownloading ? (
-                  <Loader2 size={13} className="animate-spin" />
+                  <Loader2 size={12} className="animate-spin" />
                 ) : (
-                  <Download size={13} />
+                  <Download size={12} />
                 )}
                 DOWNLOAD SATELLITE IMAGE
               </button>
@@ -706,13 +818,13 @@ export default function MapLayersView({ onBack, initialParams }) {
 
         <button
           onClick={() => { setIsDrawing(!isDrawing); if (isDrawing) setBounds(null); }}
-          className={`flex items-center gap-2.5 px-7 py-2.5 rounded-md font-mono text-sm font-medium shadow-sm transition-colors cursor-pointer ${
+          className={`flex items-center justify-center gap-2 px-5 sm:px-7 py-2 sm:py-2.5 rounded-xl font-mono text-xs sm:text-sm font-medium shadow-lg transition-colors cursor-pointer whitespace-nowrap ${
             isDrawing
               ? 'bg-mc-primary text-white shadow-sm'
               : 'bg-mc-panel border border-mc-border text-mc-text hover:border-mc-primary'
           }`}
         >
-          <Target size={15} />
+          <Target size={14} />
           {isDrawing ? 'DRAG ON MAP TO SELECT AREA' : 'DRAW SELECTION BOX'}
         </button>
       </div>
@@ -739,9 +851,23 @@ export default function MapLayersView({ onBack, initialParams }) {
 
             {/* Target & AOI Details */}
             <div className="bg-mc-bg/80 border border-mc-border/60 rounded-lg p-3 text-xs flex flex-col gap-1.5">
-              <div className="flex justify-between items-center text-mc-muted text-[11px]">
-                <span>TARGET REGION:</span>
-                <span className="text-mc-text font-bold">{placeName || 'Selected AOI'}</span>
+              <div className="flex justify-between items-start text-mc-muted text-[11px] gap-2">
+                <span className="shrink-0">TARGET REGION:</span>
+                <div className="text-right">
+                  <span className="text-mc-text font-bold block truncate max-w-[240px]">
+                    {placeName || 'Selected AOI'}
+                  </span>
+                  {aoiDetails?.country && (
+                    <span className="text-[10px] text-mc-muted block">
+                      {[aoiDetails.state, aoiDetails.country].filter(Boolean).join(', ')}
+                    </span>
+                  )}
+                  {isResolvingAoi && (
+                    <span className="text-[9px] text-amber-500 animate-pulse font-mono block">
+                      Resolving exact administrative boundaries...
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="flex justify-between items-center text-mc-muted text-[11px]">
                 <span>COVERAGE SCOPE:</span>
@@ -752,21 +878,32 @@ export default function MapLayersView({ onBack, initialParams }) {
                 <span className="text-mc-primary font-bold">{getAreaKm2()} km²</span>
               </div>
               <div className="flex justify-between items-center text-mc-muted text-[11px]">
+                <span>ESTIMATED STORAGE:</span>
+                <span className="text-amber-400 font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+                  {estimateStorage()}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-mc-muted text-[11px]">
                 <span>SENSOR RESOLUTION:</span>
-                <span className="text-emerald-400 font-semibold">10m Multi-Spectral Optical</span>
+                <span className="text-emerald-400 font-semibold">Sub-Meter Ultra-HD (&lt; 0.5m/px)</span>
               </div>
             </div>
 
             {/* Format Selection */}
             <div>
-              <label className="text-[10px] uppercase text-mc-muted tracking-wider block mb-2">
-                Select Output Format:
-              </label>
+              <div className="flex justify-between items-center mb-2">
+                <label className="text-[10px] uppercase text-mc-muted tracking-wider">
+                  Select Output Format:
+                </label>
+                <span className="text-[10px] font-mono text-amber-400 font-semibold">
+                  Payload: {estimateStorage(exportFormat)}
+                </span>
+              </div>
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { id: 'png', label: 'PNG Image', desc: '10m True Color' },
-                  { id: 'tif', label: 'GeoTIFF', desc: 'GIS Georeferenced' },
-                  { id: 'geojson', label: 'GeoJSON', desc: 'Vector Polygon' },
+                  { id: 'png', label: 'Ultra-HD PNG', desc: 'Sub-Meter Clarity (2048px)', est: estimateStorage('png') },
+                  { id: 'tif', label: 'GeoTIFF (.tif)', desc: 'GIS Georeferenced', est: estimateStorage('tif') },
+                  { id: 'geojson', label: 'GeoJSON', desc: 'Vector AOI Polygon', est: estimateStorage('geojson') },
                 ].map(fmt => (
                   <button
                     key={fmt.id}
@@ -777,8 +914,13 @@ export default function MapLayersView({ onBack, initialParams }) {
                         : 'bg-mc-bg/40 border-mc-border/50 text-mc-muted hover:border-mc-border hover:text-mc-text'
                     }`}
                   >
-                    <span className="text-xs font-bold">{fmt.label}</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold">{fmt.label}</span>
+                    </div>
                     <span className="text-[9px] opacity-75">{fmt.desc}</span>
+                    <span className="text-[9px] font-mono font-semibold text-amber-400/90 mt-1">
+                      {fmt.est}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -786,16 +928,21 @@ export default function MapLayersView({ onBack, initialParams }) {
 
             {/* Observation Year Selection */}
             <div>
-              <label className="text-[10px] uppercase text-mc-muted tracking-wider block mb-2">
-                Observation Year:
-              </label>
+              <div className="flex justify-between items-center mb-2">
+                <label className="text-[10px] uppercase text-mc-muted tracking-wider">
+                  Observation Year:
+                </label>
+                <span className="text-[10px] font-mono text-mc-muted">
+                  Active: <strong className="text-amber-500">{exportYear}</strong>
+                </span>
+              </div>
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-                {['2025', '2024', '2023', '2022', '2020'].map(yr => (
+                {['2026', '2025', '2024', '2023', '2022', '2020'].map(yr => (
                   <button
                     key={yr}
-                    onClick={() => setExportYear(yr)}
+                    onClick={() => { setExportYear(yr); setCustomYearInput(''); }}
                     className={`px-3 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${
-                      exportYear === yr
+                      exportYear === yr && !customYearInput
                         ? 'bg-amber-600 text-white border-amber-500 font-bold'
                         : 'bg-mc-bg border-mc-border text-mc-muted hover:text-mc-text'
                     }`}
@@ -803,6 +950,22 @@ export default function MapLayersView({ onBack, initialParams }) {
                     {yr}
                   </button>
                 ))}
+                {/* Custom Year Input */}
+                <div className="flex items-center gap-1 ml-1 pl-2 border-l border-mc-border/60">
+                  <input
+                    type="number"
+                    min={2015}
+                    max={new Date().getFullYear()}
+                    placeholder="Custom"
+                    value={customYearInput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCustomYearInput(val);
+                      if (val.length === 4) setExportYear(val);
+                    }}
+                    className="w-18 bg-mc-bg border border-mc-border text-xs px-2 py-1 rounded text-mc-text outline-none focus:border-amber-500 font-mono placeholder:text-mc-muted/50"
+                  />
+                </div>
               </div>
             </div>
 

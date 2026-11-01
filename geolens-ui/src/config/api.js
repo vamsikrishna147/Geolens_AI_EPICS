@@ -27,9 +27,17 @@ export async function apiFetch(url, options = {}, timeoutMs = 20000) {
 
   const fullUrl = getApiUrl(url);
 
+  // Auto-attach admin authentication token if requesting admin endpoints
+  const headers = { ...(options.headers || {}) };
+  const adminToken = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('geolens_admin_token') : null;
+  if (adminToken && !headers['X-Admin-Key'] && !headers['Authorization']) {
+    headers['X-Admin-Key'] = adminToken;
+  }
+
   try {
     const response = await fetch(fullUrl, {
       ...options,
+      headers,
       signal: controller.signal,
     });
     clearTimeout(id);

@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import { 
   Server, ShieldCheck, Activity, Database, RefreshCw, Cpu, 
   ArrowLeft, CheckCircle2, AlertCircle, Trash2, Terminal, Layers, 
-  Clock, HardDrive, Wifi, Globe, Play, UserCheck, Key, Save, Zap, ChevronDown, ChevronUp
+  Clock, HardDrive, Wifi, Globe, Play, UserCheck, Key, Save, Zap, ChevronDown, ChevronUp,
+  Lock, LogOut, ShieldAlert, Eye, EyeOff, FileText, Download
 } from 'lucide-react';
 import { apiFetch, getApiUrl } from '../config/api';
 
@@ -16,17 +17,44 @@ const AGENT_FLEET = [
 ];
 
 export default function AdminPortal() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [passkeyInput, setPasskeyInput] = useState('');
+  const [showPasskey, setShowPasskey] = useState(false);
+  const [authError, setAuthError] = useState(null);
+  const [loggingIn, setLoggingIn] = useState(false);
+
   const [telemetry, setTelemetry] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actionMessage, setActionMessage] = useState(null);
-  const [activeTab, setActiveTab] = useState('overview'); // overview, agents, logs, network
+  const [activeTab, setActiveTab] = useState('overview'); // overview, agents, logs, security, network
   const [showKeyConfig, setShowKeyConfig] = useState(false);
   const [groqKey, setGroqKey] = useState('');
   const [groqModel, setGroqModel] = useState('llama-3.3-70b-versatile');
   const [geminiKey1, setGeminiKey1] = useState('');
   const [geminiKey2, setGeminiKey2] = useState('');
   const [savingKeys, setSavingKeys] = useState(false);
+  const [securityAudit, setSecurityAudit] = useState(null);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+
+  const checkAuth = async () => {
+    setAuthChecking(true);
+    try {
+      const res = await apiFetch('/api/admin/verify');
+      if (res.ok) {
+        setIsAuthenticated(true);
+        fetchSystemData();
+      } else {
+        setIsAuthenticated(false);
+      }
+    } catch {
+      setIsAuthenticated(false);
+    } finally {
+      setAuthChecking(false);
+      setLoading(false);
+    }
+  };
 
   const fetchSystemData = async () => {
     try {
@@ -35,6 +63,8 @@ export default function AdminPortal() {
       if (res.ok) {
         const data = await res.json();
         setTelemetry(data);
+      } else if (res.status === 401) {
+        setIsAuthenticated(false);
       }
     } catch (err) {
       console.warn("Admin telemetry error:", err.message);
@@ -44,11 +74,97 @@ export default function AdminPortal() {
     }
   };
 
+  const fetchSecurityAudit = async () => {
+    try {
+      setLoadingAudit(true);
+      const res = await apiFetch('/api/admin/security/audit');
+      if (res.ok) {
+        const data = await res.json();
+        setSecurityAudit(data);
+      }
+    } catch (err) {
+      console.warn("Security audit fetch error:", err);
+    } finally {
+      setLoadingAudit(false);
+    }
+  };
+
   useEffect(() => {
-    fetchSystemData();
+    checkAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
     const interval = setInterval(fetchSystemData, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAuthenticated]);
+
+  const [sessions, setSessions] = useState([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+
+  const fetchSessions = async () => {
+    try {
+      setLoadingSessions(true);
+      const res = await apiFetch('/api/workspace/sessions');
+      if (res.ok) {
+        const data = await res.json();
+        setSessions(data.sessions || []);
+      }
+    } catch (e) {
+      console.warn("Failed to load sessions for admin:", e);
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'security' && isAuthenticated) {
+      fetchSecurityAudit();
+    }
+    if (activeTab === 'reports' && isAuthenticated) {
+      fetchSessions();
+    }
+  }, [activeTab, isAuthenticated]);
+
+  const handleLogin = async (e) => {
+    if (e) e.preventDefault();
+    if (!passkeyInput.trim()) {
+      setAuthError('Please enter the administrative master passkey.');
+      return;
+    }
+    setLoggingIn(true);
+    setAuthError(null);
+    try {
+      const res = await apiFetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_key: passkeyInput.trim() })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        sessionStorage.setItem('geolens_admin_token', data.token);
+        setIsAuthenticated(true);
+        setPasskeyInput('');
+        fetchSystemData();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setAuthError(errData.detail || 'Access denied: Invalid administrative passkey.');
+      }
+    } catch (err) {
+      setAuthError(err.message || 'Network error connecting to administrative gateway.');
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await apiFetch('/api/admin/logout', { method: 'POST' });
+    } catch {}
+    sessionStorage.removeItem('geolens_admin_token');
+    setIsAuthenticated(false);
+    setTelemetry(null);
+  };
 
   const handleClearCache = async () => {
     try {
@@ -167,6 +283,108 @@ export default function AdminPortal() {
     );
   };
 
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-mc-bg text-mc-text font-body flex items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-3 font-mono text-xs text-mc-muted">
+          <RefreshCw size={24} className="animate-spin text-mc-primary" />
+          <span>VERIFYING ADMINISTRATIVE ACCESS PRIVILEGES...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-mc-bg text-mc-text font-body flex flex-col justify-between p-6">
+        <div className="max-w-md w-full mx-auto my-auto space-y-6">
+          <div className="text-center space-y-2">
+            <div className="w-16 h-16 rounded-2xl bg-mc-panel border border-mc-border flex items-center justify-center mx-auto shadow-xl">
+              <Lock size={32} className="text-mc-primary animate-pulse" />
+            </div>
+            <h1 className="font-heading text-xl font-bold tracking-wide text-white uppercase">
+              Admin Isolation Gateway
+            </h1>
+            <p className="text-xs font-mono text-mc-muted">
+              Restricted Area · Special Access Control & System Telemetry
+            </p>
+          </div>
+
+          <div className="p-6 rounded-xl bg-mc-panel border border-mc-border shadow-2xl space-y-4">
+            <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-mono flex items-start gap-2">
+              <ShieldAlert size={16} className="shrink-0 mt-0.5" />
+              <span>User portal is strictly isolated. All administrative modifications require master passkey verification.</span>
+            </div>
+
+            {authError && (
+              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono flex items-center gap-2 animate-in fade-in">
+                <AlertCircle size={16} className="shrink-0" />
+                <span>{authError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-mono text-mc-muted uppercase tracking-wider">
+                  Administrative Master Key
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPasskey ? "text" : "password"}
+                    value={passkeyInput}
+                    onChange={(e) => setPasskeyInput(e.target.value)}
+                    placeholder="Enter GEOLENS_ADMIN_KEY..."
+                    autoFocus
+                    className="w-full px-3.5 py-2.5 rounded-lg bg-mc-bg border border-mc-border focus:border-mc-primary text-white text-xs font-mono placeholder:text-zinc-600 focus:outline-none transition-colors pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasskey(!showPasskey)}
+                    className="absolute right-3 top-2.5 text-mc-muted hover:text-white cursor-pointer"
+                  >
+                    {showPasskey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loggingIn || !passkeyInput.trim()}
+                className="w-full py-2.5 rounded-lg bg-mc-primary text-black font-bold font-mono text-xs hover:brightness-110 active:brightness-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer shadow-lg shadow-mc-primary/20"
+              >
+                {loggingIn ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>AUTHENTICATING ACCESS...</span>
+                  </>
+                ) : (
+                  <>
+                    <Key size={14} />
+                    <span>UNLOCK ADMIN CONSOLE</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="pt-2 text-center">
+              <Link
+                to="/"
+                className="text-xs font-mono text-mc-muted hover:text-mc-primary transition-colors inline-flex items-center gap-1.5"
+              >
+                <ArrowLeft size={12} />
+                <span>Return to User Portal</span>
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        <div className="text-center text-[11px] font-mono text-zinc-600">
+          GeoLens AI Security Subsystem · ISO/IEC 27001 Grounded Isolation Architecture
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-mc-bg text-mc-text font-body flex flex-col">
       {/* ── Top Bar ── */}
@@ -202,9 +420,17 @@ export default function AdminPortal() {
             <RefreshCw size={13} className={refreshing ? 'animate-spin text-mc-primary' : ''} />
             <span>SYNC</span>
           </button>
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-red-500/10 border border-red-500/30 text-xs font-mono text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors cursor-pointer"
+            title="Lock administrative console and terminate session"
+          >
+            <LogOut size={13} />
+            <span className="hidden sm:inline">LOCK / LOGOUT</span>
+          </button>
           <div className="flex items-center gap-1.5 px-3 py-1 rounded bg-mc-success/10 border border-mc-success/30 text-mc-success text-xs font-mono">
             <span className="w-2 h-2 rounded-full bg-mc-success animate-pulse" />
-            <span className="font-bold">SYSTEM ACTIVE</span>
+            <span className="font-bold">SUPER ADMIN</span>
           </div>
         </div>
       </header>
@@ -214,7 +440,9 @@ export default function AdminPortal() {
         {[
           { id: 'overview', label: 'SYSTEM OVERVIEW', icon: Server },
           { id: 'agents', label: 'AGENT FLEET', icon: Cpu },
+          { id: 'reports', label: 'PDF REPORTS & SESSIONS', icon: FileText },
           { id: 'logs', label: 'TASK QUEUE & LOGS', icon: Terminal },
+          { id: 'security', label: 'SECURITY & AUDIT', icon: ShieldAlert },
           { id: 'network', label: 'NETWORK & LATENCY', icon: Wifi }
         ].map(tab => {
           const Icon = tab.icon;
@@ -483,6 +711,83 @@ export default function AdminPortal() {
           </div>
         )}
 
+        {/* ── TAB: PDF Reports & Missions ── */}
+        {activeTab === 'reports' && (
+          <div className="space-y-4">
+            <div className="p-5 rounded-lg bg-mc-panel border border-mc-border space-y-4">
+              <div className="flex items-center justify-between border-b border-mc-border pb-3">
+                <div className="flex items-center gap-2">
+                  <FileText size={18} className="text-mc-primary" />
+                  <h2 className="font-heading text-sm font-bold tracking-wide uppercase">
+                    Archived Mission Sessions & PDF Downloads
+                  </h2>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-mono text-mc-muted">
+                    Total Sessions: <b className="text-mc-primary">{sessions.length}</b>
+                  </span>
+                  <button
+                    onClick={fetchSessions}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded bg-mc-bg border border-mc-border text-mc-muted hover:text-white font-mono text-xs cursor-pointer"
+                  >
+                    <RefreshCw size={12} className={loadingSessions ? 'animate-spin' : ''} />
+                    <span>REFRESH</span>
+                  </button>
+                </div>
+              </div>
+
+              {loadingSessions ? (
+                <p className="text-xs font-mono text-mc-muted py-8 text-center">Loading mission archives...</p>
+              ) : sessions.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left font-mono text-xs">
+                    <thead>
+                      <tr className="border-b border-mc-border/60 text-mc-muted">
+                        <th className="pb-2">SESSION ID</th>
+                        <th className="pb-2">MISSION TITLE</th>
+                        <th className="pb-2">TIMESTAMP</th>
+                        <th className="pb-2">STATUS</th>
+                        <th className="pb-2 text-right">EXPORT</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-mc-border/30">
+                      {sessions.map(s => (
+                        <tr key={s.id} className="hover:bg-mc-bg/40">
+                          <td className="p-2 text-mc-muted font-bold">{s.id.slice(0, 16)}...</td>
+                          <td className="p-2 text-white font-semibold">{s.title || 'Mission Assessment'}</td>
+                          <td className="p-2 text-mc-muted">
+                            {s.date ? new Date(s.date * 1000).toLocaleString() : 'Recent'}
+                          </td>
+                          <td className="p-2">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">
+                              {s.status || 'COMPLETED'}
+                            </span>
+                          </td>
+                          <td className="p-2 text-right">
+                            <a
+                              href={getApiUrl(`/api/report/pdf/${s.id}`)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-mc-primary/20 hover:bg-mc-primary text-mc-primary hover:text-black font-mono text-xs font-bold border border-mc-primary/40 transition-colors"
+                            >
+                              <Download size={12} />
+                              <span>DOWNLOAD PDF</span>
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-xs font-mono text-mc-muted py-8 text-center">
+                  No mission sessions recorded yet. Run a query in Mission Control to generate sessions and PDFs.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── TAB 3: Tasks & Logs ── */}
         {activeTab === 'logs' && (
           <div className="space-y-4">
@@ -529,6 +834,89 @@ export default function AdminPortal() {
                   No active or queued tasks. Run a query in User Portal to see real-time queue items.
                 </p>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB: Security & Audit Console ── */}
+        {activeTab === 'security' && (
+          <div className="space-y-4">
+            <div className="p-5 rounded-lg bg-mc-panel border border-mc-border space-y-4">
+              <div className="flex items-center justify-between border-b border-mc-border pb-3">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck size={18} className="text-mc-primary" />
+                  <h2 className="font-heading text-sm font-bold tracking-wide uppercase">
+                    Security Defense Telemetry & Access Audit
+                  </h2>
+                </div>
+                <button
+                  onClick={fetchSecurityAudit}
+                  disabled={loadingAudit}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded bg-mc-bg border border-mc-border text-xs font-mono text-mc-muted hover:text-white"
+                >
+                  <RefreshCw size={12} className={loadingAudit ? 'animate-spin text-mc-primary' : ''} />
+                  <span>REFRESH AUDIT</span>
+                </button>
+              </div>
+
+              {/* Security Metrics */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono text-xs">
+                <div className="p-4 rounded bg-mc-bg border border-mc-border space-y-1">
+                  <span className="text-mc-muted text-[11px]">ACTIVE ADMIN SESSIONS</span>
+                  <p className="text-lg font-bold text-mc-primary">{securityAudit?.active_admin_sessions || 1}</p>
+                </div>
+                <div className="p-4 rounded bg-mc-bg border border-mc-border space-y-1">
+                  <span className="text-mc-muted text-[11px]">LOCKED / BLOCKED IPS</span>
+                  <p className="text-lg font-bold text-mc-success">{securityAudit?.locked_ips_count || 0}</p>
+                </div>
+                <div className="p-4 rounded bg-mc-bg border border-mc-border space-y-1">
+                  <span className="text-mc-muted text-[11px]">DEFENSE PROTOCOLS</span>
+                  <p className="text-xs font-bold text-white mt-1">RATE-LIMIT + CSRF/XSS + BRUTE-FORCE LOCK</p>
+                </div>
+              </div>
+
+              {/* Audit Log Table */}
+              <div className="space-y-2">
+                <h3 className="text-xs font-mono text-mc-muted uppercase tracking-wider">
+                  Real-time Security Events Log
+                </h3>
+                {securityAudit?.audit_events?.length > 0 ? (
+                  <div className="overflow-x-auto max-h-80 border border-mc-border/40 rounded">
+                    <table className="w-full text-left font-mono text-[11px]">
+                      <thead className="bg-mc-bg sticky top-0 border-b border-mc-border/60 text-mc-muted">
+                        <tr>
+                          <th className="p-2">TIMESTAMP (UTC)</th>
+                          <th className="p-2">EVENT</th>
+                          <th className="p-2">CLIENT IP</th>
+                          <th className="p-2">ENDPOINT</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-mc-border/30">
+                        {securityAudit.audit_events.map((evt, idx) => (
+                          <tr key={idx} className="hover:bg-mc-bg/40">
+                            <td className="p-2 text-zinc-400">{evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString() : '-'}</td>
+                            <td className="p-2">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                evt.event_type.includes('SUCCESS') ? 'bg-emerald-500/20 text-emerald-400' :
+                                evt.event_type.includes('FAILED') || evt.event_type.includes('BLOCKED') ? 'bg-red-500/20 text-red-400' :
+                                'bg-sky-500/20 text-sky-400'
+                              }`}>
+                                {evt.event_type}
+                              </span>
+                            </td>
+                            <td className="p-2 text-white">{evt.client_ip}</td>
+                            <td className="p-2 text-mc-muted truncate max-w-xs">{evt.path}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-xs font-mono text-mc-muted py-4 text-center">
+                    No security events logged in current session. All endpoints operating within secure boundaries.
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         )}

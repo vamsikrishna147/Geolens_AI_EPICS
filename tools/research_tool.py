@@ -22,6 +22,7 @@ from storage.storage_manager import StorageManager
 class ResearchToolInput(BaseModel):
     query: str = Field(..., description="Research topic to search, e.g. 'flood detection Andhra Pradesh satellite imagery'")
     max_results: Optional[int] = Field(10, description="Max number of papers to return (1-50).")
+    limit: Optional[int] = Field(None, description="Alias for max_results.")
     year_from: Optional[int] = Field(2018, description="Minimum publication year.")
     query_id: Optional[str] = Field("", description="Query ID for storage tracking.")
 
@@ -48,10 +49,12 @@ class ResearchTool(BaseTool):
         self,
         query: str,
         max_results: Optional[int] = 10,
+        limit: Optional[int] = None,
         year_from: Optional[int] = 2018,
         query_id: str = "",
     ) -> str:
-        max_results = max(1, min(max_results or 10, 50))
+        effective_limit = limit or max_results or 10
+        max_results = max(1, min(effective_limit, 50))
         print(f"[ResearchTool] Searching OpenAlex for: '{query}'")
 
         try:

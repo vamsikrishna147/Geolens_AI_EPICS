@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useMission } from '../context/MissionContext';
-import axios from 'axios';
 import { API_BASE_URL } from '../config/api';
 
 // ── Local session workspace ───────────────────────────────────────────
@@ -34,10 +33,10 @@ function saveSessionMission(entry) {
 // ── Icon helper ───────────────────────────────────────────────────────
 
 function MissionIcon({ type }) {
-  const base = 'p-4 rounded-xl flex items-center justify-center shrink-0';
-  if (type === 'completed') return <div className={`${base} bg-mc-success/10 text-mc-success`}><CheckCircle2 size={26} /></div>;
-  if (type === 'failed')    return <div className={`${base} bg-mc-danger/10 text-mc-danger`}><History size={26} /></div>;
-  return                          <div className={`${base} bg-mc-primary/10 text-mc-primary`}><FileText size={26} /></div>;
+  const base = 'p-2.5 sm:p-4 rounded-xl flex items-center justify-center shrink-0';
+  if (type === 'completed') return <div className={`${base} bg-mc-success/10 text-mc-success`}><CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6" /></div>;
+  if (type === 'failed')    return <div className={`${base} bg-mc-danger/10 text-mc-danger`}><History className="w-5 h-5 sm:w-6 sm:h-6" /></div>;
+  return                          <div className={`${base} bg-mc-primary/10 text-mc-primary`}><FileText className="w-5 h-5 sm:w-6 sm:h-6" /></div>;
 }
 
 // ── WorkspaceView ─────────────────────────────────────────────────────
@@ -139,35 +138,35 @@ export default function WorkspaceView({ onBack }) {
   );
 
   return (
-    <div className="absolute inset-0 bg-mc-bg/95 z-40 flex animate-in fade-in zoom-in-95 duration-300">
-      <div className="flex-1 max-w-5xl mx-auto h-full flex flex-col p-8">
+    <div className="absolute inset-0 bg-mc-bg z-40 flex animate-in fade-in zoom-in-95 duration-300 overflow-hidden">
+      <div className="flex-1 max-w-5xl mx-auto h-full flex flex-col p-3 pl-14 sm:p-6 sm:pl-24 md:p-8 md:pl-28 pb-8">
 
         {/* Header */}
-        <div className="shrink-0 mb-8">
+        <div className="shrink-0 mb-6 sm:mb-8">
           <button
             onClick={onBack}
-            className="text-mc-primary hover:text-mc-text font-mono text-xs mb-4 flex items-center gap-2 transition-colors tracking-widest uppercase"
+            className="text-mc-primary hover:text-mc-text font-mono text-xs mb-3 flex items-center gap-1.5 transition-colors tracking-widest uppercase cursor-pointer"
           >
             <ChevronRight size={14} className="rotate-180" /> Back to Mission Control
           </button>
-          <h1 className="text-4xl font-heading font-bold text-mc-text tracking-wide flex items-center gap-3">
-            <FolderOpen className="text-mc-primary" size={32} />
+          <h1 className="text-2xl sm:text-4xl font-heading font-bold text-mc-text tracking-wide flex items-center gap-2.5 sm:gap-3">
+            <FolderOpen className="text-mc-primary shrink-0" size={28} />
             {t('Workspace')}
           </h1>
-          <p className="text-mc-muted mt-2 font-light">
+          <p className="text-mc-muted mt-1.5 text-xs sm:text-sm font-light">
             Completed missions are saved here for the current session.
           </p>
         </div>
 
         {/* Search */}
-        <div className="shrink-0 mb-6 flex items-center gap-3 bg-mc-panel border border-mc-border rounded-xl px-4 py-3">
-          <Search size={18} className="text-mc-muted shrink-0" />
+        <div className="shrink-0 mb-4 sm:mb-6 flex items-center gap-2.5 sm:gap-3 bg-mc-panel border border-mc-border rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 shadow-inner">
+          <Search size={16} className="text-mc-muted shrink-0" />
           <input
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search missions..."
-            className="bg-transparent border-none outline-none text-mc-text font-mono text-sm w-full placeholder:text-mc-muted/50"
+            className="bg-transparent border-none outline-none text-mc-text font-mono text-xs sm:text-sm w-full placeholder:text-mc-muted/50"
           />
         </div>
 
@@ -188,46 +187,56 @@ export default function WorkspaceView({ onBack }) {
             filtered.map(item => (
               <div
                 key={item.id}
-                className="bg-mc-panel border border-mc-border rounded-2xl p-5 flex items-center justify-between group hover:border-mc-border transition-all duration-200"
+                className="bg-mc-panel border border-mc-border rounded-2xl p-3.5 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 group hover:border-mc-primary/40 transition-all duration-200 shadow-sm"
               >
-                <div className="flex items-center gap-5 min-w-0">
+                <div className="flex items-center gap-3.5 sm:gap-5 min-w-0">
                   <MissionIcon type={item.status} />
-                  <div className="min-w-0">
-                    <h3 className="text-base font-heading font-semibold text-mc-text group-hover:text-mc-primary transition-colors truncate">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm sm:text-base font-heading font-semibold text-mc-text group-hover:text-mc-primary transition-colors truncate">
                       {item.title}
                     </h3>
-                    <div className="flex items-center gap-4 mt-1 text-xs text-mc-muted font-mono">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-1 text-[11px] sm:text-xs text-mc-muted font-mono">
                       <span className="flex items-center gap-1">
                         <Clock size={12} /> {item.date}
                       </span>
-                      <span className="flex items-center gap-1 text-mc-success">
+                      <span className="flex items-center gap-1 text-mc-success font-semibold">
                         <CheckCircle2 size={12} /> {item.status}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0 ml-4">
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto sm:ml-4">
+                  <a
+                    href={`${API}/api/report/pdf/${item.id}`}
+                    download={`GeoLens_Report_${item.id}.pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1.5 sm:px-3 sm:py-2 bg-red-600/15 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 font-mono text-xs font-semibold shadow-sm"
+                    title="Download Official PDF Report"
+                  >
+                    <Download size={13} />
+                    <span>PDF</span>
+                  </a>
                   <button
                     onClick={() => handleShare(item)}
-                    className="p-2.5 bg-mc-bg border border-mc-border text-mc-muted hover:text-mc-primary hover:border-mc-border rounded-lg transition-all"
+                    className="p-2 sm:p-2.5 bg-mc-bg border border-mc-border text-mc-muted hover:text-mc-primary hover:border-mc-primary/40 rounded-lg transition-all cursor-pointer"
                     title="Copy to clipboard"
                   >
-                    <Share2 size={16} />
+                    <Share2 size={15} />
                   </button>
                   <button
                     onClick={() => handleDownload(item)}
-                    className="p-2.5 bg-mc-primary text-white hover:bg-mc-secondary rounded-lg transition-all shadow-sm"
+                    className="p-2 sm:p-2.5 bg-mc-primary text-white hover:bg-mc-secondary rounded-lg transition-all shadow-sm cursor-pointer"
                     title="Download JSON"
                   >
-                    <Download size={16} />
+                    <Download size={15} />
                   </button>
                 </div>
               </div>
             ))
           )}
         </div>
-
       </div>
     </div>
   );

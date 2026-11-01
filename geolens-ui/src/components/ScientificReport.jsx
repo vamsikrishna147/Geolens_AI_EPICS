@@ -4,7 +4,7 @@ import {
   X, Download, FileImage, FileText, Loader2,
   CheckCircle, AlertCircle, Satellite, BarChart3,
   MapPin, Calendar, Database, Activity, Shield,
-  ExternalLink,
+  ExternalLink, Printer,
 } from 'lucide-react';
 import { apiFetch } from '../config/api';
 
@@ -50,7 +50,7 @@ function KVRow({ label, value }) {
       <td className="py-2.5 px-4 text-[10px] font-semibold uppercase tracking-widest text-slate-500 bg-slate-50/60 w-2/5 border-r border-slate-100 align-top">
         {label}
       </td>
-      <td className="py-2.5 px-4 text-[13px] text-slate-700 align-top break-words leading-relaxed" style={{ fontFamily: "'Source Serif 4', Georgia, serif" }}>{value}</td>
+      <td className="py-2.5 px-4 text-[13px] text-slate-700 align-top break-words leading-relaxed" style={{ fontFamily: "'Lora', Georgia, serif" }}>{value}</td>
     </tr>
   );
 }
@@ -188,19 +188,54 @@ function ModeToggle({ mode, onChange }) {
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function ScientificReport({ onClose }) {
+export default function ScientificReport({ onClose, reportData }) {
   const { finalReport } = useMission();
   const [mode, setMode]           = useState('full_analysis');
   const [loading, setLoading]     = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [status, setStatus]       = useState(null); // { ok, message }
 
-  if (!finalReport || !finalReport.official_report) return null;
+  // Resolve active report: prop > MissionContext > sessionStorage cache
+  const activeReport = reportData || finalReport || (() => {
+    try {
+      const saved = sessionStorage.getItem('geolens_workspace');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].data) {
+          return parsed[0].data;
+        }
+      }
+    } catch (_) {}
+    return null;
+  })();
 
-  const report = finalReport.official_report || {};
-  const plan   = finalReport.analysis_plan   || {};
-  const data   = finalReport.data_acquisition|| {};
-  const gis    = finalReport.gis_processing  || {};
-  const eo     = finalReport.earth_observation|| {};
+  if (!activeReport || !activeReport.official_report) {
+    return (
+      <div className="absolute inset-0 bg-slate-900/80 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div className="bg-slate-900 border border-slate-700 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl space-y-4">
+          <FileText size={40} className="text-amber-500 mx-auto opacity-75" />
+          <h3 className="font-heading text-lg font-bold text-white uppercase tracking-wider">
+            No Mission Report Available
+          </h3>
+          <p className="text-slate-400 font-body text-xs leading-relaxed">
+            Please run an intelligence query in Mission Control or select a saved mission from the Workspace to view and download its report.
+          </p>
+          <button
+            onClick={onClose}
+            className="w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-mono text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+          >
+            Back to Mission Control
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const report = activeReport.official_report || {};
+  const plan   = activeReport.analysis_plan   || {};
+  const data   = activeReport.data_acquisition|| {};
+  const gis    = activeReport.gis_processing  || {};
+  const eo     = activeReport.earth_observation|| {};
 
   // ── Derived fields ────────────────────────────────────────────────────────
   const location    = safe(plan.location     || report.title, '');
@@ -282,6 +317,7 @@ export default function ScientificReport({ onClose }) {
     rawConf = Math.min(96, Math.max(88, rawConf + 18));
   }
   const confidenceScore = Math.min(98, Math.max(88, rawConf));
+  const confidence = confidenceScore;
 
   // ── Satellite Imagery State & Dynamic Resolver ─────────────────────────
   const satImg = report.satellite_imagery || finalReport.satellite_imagery || eo.satellite_imagery || {};
@@ -340,7 +376,45 @@ export default function ScientificReport({ onClose }) {
     document.body.removeChild(a);
   };
 
-  // ── Download handler ──────────────────────────────────────────────────────
+  // ── 1-Click PDF Report Downloader ─────────────────────────────────────────
+  const handleDownloadPDF = async () => {
+    setPdfLoading(true);
+    setStatus(null);
+    try {
+      const res = await apiFetch('/api/report/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...activeReport, mode }),
+      });
+
+      if (!res.ok) throw new Error(`Server returned status ${res.status}`);
+
+      const blob = await res.blob();
+      const reportId = safe(report.report_id, 'REPORT');
+      const suffix   = mode === 'imagery_only' ? 'imagery' : 'full';
+      const filename = `GeoLens_${suffix}_${reportId}.pdf`;
+
+      const url = window.URL.createObjectURL(blob);
+      const a   = document.createElement('a');
+      a.href     = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      setStatus({ ok: true, message: `Successfully downloaded PDF: ${filename}` });
+    } catch (err) {
+      console.warn('PDF export notice:', err);
+      setStatus({ ok: false, message: `PDF download note: ${err.message}. Opening system print dialog...` });
+      // Fallback: print to PDF
+      window.print();
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  // ── HTML Download handler ──────────────────────────────────────────────────
   const handleDownload = async () => {
     setLoading(true);
     setStatus(null);
@@ -348,7 +422,7 @@ export default function ScientificReport({ onClose }) {
       const res = await apiFetch('/api/report/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...finalReport, mode }),
+        body: JSON.stringify({ ...activeReport, mode }),
       });
 
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
@@ -367,14 +441,10 @@ export default function ScientificReport({ onClose }) {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      setStatus({ ok: true, message: `Downloaded ${filename}` });
-
-      // Auto-open print dialog after short delay so user can save as PDF
-      setTimeout(() => window.print(), 600);
+      setStatus({ ok: true, message: `Downloaded HTML archive: ${filename}` });
     } catch (err) {
       console.warn('Export error:', err);
       setStatus({ ok: false, message: `Export failed: ${err.message}` });
-      // Fallback: print current view
       window.print();
     } finally {
       setLoading(false);
@@ -400,31 +470,54 @@ export default function ScientificReport({ onClose }) {
         {/* ── Header bar ──────────────────────────────────────────────── */}
         <div className="bg-slate-900 text-white px-6 py-3.5 flex justify-between items-center border-b-2 border-amber-600">
           <div className="flex items-center gap-2.5">
-            <span className="text-amber-500 text-sm">🛰</span>
-            <span className="font-heading font-extrabold text-[12px] tracking-[0.14em] text-white uppercase" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            <span className="w-2 h-2 rounded-full bg-amber-500" />
+            <span className="font-heading font-extrabold text-[12px] tracking-[0.14em] text-white uppercase" style={{ fontFamily: "var(--font-heading)" }}>
               <span className="text-amber-500">GEOLENS</span> AI
             </span>
             <span className="text-slate-600 font-bold">·</span>
-            <span className="font-heading font-semibold text-[11px] tracking-[0.12em] uppercase text-slate-300" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            <span className="font-heading font-semibold text-[11px] tracking-[0.12em] uppercase text-slate-300" style={{ fontFamily: "var(--font-heading)" }}>
               Geospatial Intelligence Report
             </span>
           </div>
-          <span className="font-heading text-[10px] font-bold tracking-wider uppercase bg-amber-500/15 text-amber-400 border border-amber-500/30 px-3 py-1 rounded-md" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+          <span className="font-heading text-[10px] font-bold tracking-wider uppercase bg-amber-500/15 text-amber-400 border border-amber-500/30 px-3 py-1 rounded-md" style={{ fontFamily: "var(--font-heading)" }}>
             {safe(report.classification, 'Official Geospatial Assessment')}
           </span>
         </div>
 
-        {/* ── Toolbar: mode toggle + download ─────────────────────────── */}
+        {/* ── Toolbar: mode toggle + PDF & HTML download options ──────────────── */}
         <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 flex flex-wrap gap-3 items-center justify-between no-print">
           <ModeToggle mode={mode} onChange={setMode} />
-          <button
-            onClick={handleDownload}
-            disabled={loading}
-            className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-sm"
-          >
-            {loading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-            {loading ? 'Generating…' : mode === 'imagery_only' ? 'Download Imagery Report' : 'Download Full Report'}
-          </button>
+          
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleDownloadPDF}
+              disabled={pdfLoading}
+              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-sm"
+              title="Download publication-quality PDF report"
+            >
+              {pdfLoading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              <span>{pdfLoading ? 'Generating PDF…' : 'Download PDF Report'}</span>
+            </button>
+
+            <button
+              onClick={handleDownload}
+              disabled={loading}
+              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-60 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors cursor-pointer shadow-sm"
+              title="Download standalone HTML archive"
+            >
+              {loading ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
+              <span>HTML Archive</span>
+            </button>
+
+            <button
+              onClick={() => window.print()}
+              className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg transition-colors cursor-pointer"
+              title="Print to PDF / Paper"
+              aria-label="Print report"
+            >
+              <Printer size={14} />
+            </button>
+          </div>
         </div>
 
         {/* Status message */}
@@ -521,7 +614,7 @@ export default function ScientificReport({ onClose }) {
                   Primary Classification: <strong className="text-slate-900">{analytics.primary_impact || 'Surface Water & Vegetation Dynamics'}</strong>
                 </span>
                 <span className="bg-white px-2 py-0.5 rounded border border-slate-200">
-                  Status: <strong className="text-emerald-700 font-bold">Cloud-Mask Verified ✓</strong>
+                  Status: <strong className="text-emerald-700 font-bold">Cloud-Mask Verified</strong>
                 </span>
               </div>
             </div>

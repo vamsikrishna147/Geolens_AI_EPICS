@@ -13,11 +13,11 @@
   --color-mc-text: #FAFAFA;         /* Zinc-50 — primary text */
   --color-mc-muted: #A1A1AA;        /* Zinc-400 — accessible muted/caption text (8.4:1 ratio) */
 
-  /* ── Typography ─────────────────────────────────────────────── */
-  --font-heading: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
-  --font-body: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-  --font-report: 'Source Serif 4', 'Georgia', serif;
+  /* ── Typography (Authoritative Geospatial Stack - Zero Inter / Geist / Space Grotesk) ── */
+  --font-heading: 'Syne', 'DM Sans', system-ui, sans-serif;
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-report: 'Lora', 'Georgia', serif;
 }
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -28,14 +28,13 @@
     background-color: var(--color-mc-bg);
     color: var(--color-mc-text);
     font-family: var(--font-body);
-    font-feature-settings: 'cv01', 'cv02', 'cv03'; /* Inter OpenType stylistic alternates */
     overflow: hidden;
     margin: 0;
     padding: 0;
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    letter-spacing: -0.011em; /* Tighter tracking like Vercel/Linear */
+    letter-spacing: -0.01em;
   }
 }
 
@@ -284,3 +283,50 @@
   background-image: none !important;
   background-color: var(--color-mc-primary) !important;
 }
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   KINETIC TYPOGRAPHY — Tactical Mission Intelligence
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+@keyframes kinetic-pulse {
+  0%, 100% { letter-spacing: 0.08em; opacity: 0.95; }
+  50% { letter-spacing: 0.12em; opacity: 1; }
+}
+
+@keyframes kinetic-glow {
+  0%, 100% { text-shadow: 0 0 1px rgba(217, 119, 6, 0.2); }
+  50% { text-shadow: 0 0 8px rgba(217, 119, 6, 0.45); }
+}
+
+@keyframes kinetic-stream {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-50%); }
+}
+
+.kinetic-title {
+  font-family: var(--font-heading);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  transition: letter-spacing 0.3s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s ease;
+}
+
+.kinetic-title:hover {
+  letter-spacing: 0.12em;
+}
+
+.kinetic-telemetry {
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
+.kinetic-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+

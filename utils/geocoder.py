@@ -529,6 +529,112 @@ def clear_geocode_cache() -> dict:
     }
 
 
+def reverse_geocode(lat: float, lon: float, lang: str = "en") -> dict:
+    """
+    Reverse geocodes a latitude and longitude into an administrative place name and details.
+    Uses Photon reverse API first, then Nominatim with caching.
+    """
+    cache_key = f"rev:{round(lat, 3)}:{round(lon, 3)}:{lang}"
+    if cache_key in _geocode_cache:
+        return _geocode_cache[cache_key]
+
+    if _redis and _redis.is_connected:
+        cached = _redis.get(f"geolens:geocode:{cache_key}")
+        if cached:
+            return cached
+
+    # 1. Try Photon reverse
+    try:
+        url = f"https://photon.komoot.io/reverse?lat={lat}&lon={lon}"
+        resp = requests.get(url, timeout=4, headers={"User-Agent": "GeoLensAI/2.0"})
+        if resp.status_code == 200:
+            data = resp.json()
+            features = data.get("features", [])
+            if features:
+                props = features[0].get("properties", {})
+                name = props.get("name") or props.get("city") or props.get("district") or props.get("state") or "Selected AOI"
+                city = props.get("city") or props.get("town") or props.get("village") or props.get("county") or ""
+                state = props.get("state", "")
+                country = props.get("country", "")
+                
+                parts = [p for p in [name, city, state, country] if p]
+                # deduplicate preserving order
+                seen = set()
+                deduped = []
+                for p in parts:
+                    if p.lower() not in seen:
+                        seen.add(p.lower())
+                        deduped.append(p)
+                
+                display_name = ", ".join(deduped) if deduped else name
+                result = {
+                    "display_name": display_name,
+                    "short_name": name,
+                    "city": city,
+                    "state": state,
+                    "country": country,
+                    "lat": lat,
+                    "lon": lon
+                }
+                _geocode_cache[cache_key] = result
+                _save_cache()
+                if _redis and _redis.is_connected:
+                    _redis.set(f"geolens:geocode:{cache_key}", result, ttl=604800)
+                return result
+    except Exception:
+        pass
+
+    # 2. Fallback Nominatim reverse
+    _rate_limit()
+    try:
+        url = "https://nominatim.openstreetmap.org/reverse"
+        resp = requests.get(
+            url,
+            params={"lat": lat, "lon": lon, "format": "json", "addressdetails": 1},
+            headers={"User-Agent": "Mozilla/5.0 GeoLensAI/2.0"},
+            timeout=8
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            addr = data.get("address", {})
+            name = (
+                addr.get("city") or addr.get("town") or addr.get("village") or
+                addr.get("county") or addr.get("state_district") or addr.get("state") or
+                data.get("name") or "Selected Region"
+            )
+            state = addr.get("state", "")
+            country = addr.get("country", "")
+            disp = data.get("display_name", f"{lat:.3f}, {lon:.3f}")
+            result = {
+                "display_name": disp,
+                "short_name": name,
+                "city": addr.get("city") or addr.get("town") or "",
+                "state": state,
+                "country": country,
+                "lat": lat,
+                "lon": lon
+            }
+            _geocode_cache[cache_key] = result
+            _save_cache()
+            if _redis and _redis.is_connected:
+                _redis.set(f"geolens:geocode:{cache_key}", result, ttl=604800)
+            return result
+    except Exception:
+        pass
+
+    fallback = {
+        "display_name": f"Coordinates ({lat:.4f}, {lon:.4f})",
+        "short_name": f"AOI ({lat:.3f}, {lon:.3f})",
+        "city": "",
+        "state": "",
+        "country": "",
+        "lat": lat,
+        "lon": lon
+    }
+    return fallback
+
+
 # Pre-load cache on module import
 _load_cache()
+
 

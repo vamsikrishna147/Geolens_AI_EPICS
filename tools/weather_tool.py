@@ -25,6 +25,7 @@ class WeatherToolInput(BaseModel):
     location: str = Field(..., description="Location name, e.g. 'Konaseema district, Andhra Pradesh, India'")
     start_date: Optional[str] = Field(None, description="Start date in YYYY-MM-DD format. Defaults to 7 days ago.")
     end_date: Optional[str] = Field(None, description="End date in YYYY-MM-DD format. Defaults to today.")
+    days: Optional[int] = Field(None, description="Number of historical days to fetch (alternative to start_date/end_date).")
     variables: Optional[str] = Field(
         "temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,et0_fao_evapotranspiration",
         description="Comma-separated weather variables. Common: temperature_2m_max, precipitation_sum, windspeed_10m_max, relative_humidity_2m_max"
@@ -54,15 +55,20 @@ class WeatherTool(BaseTool):
         location: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        days: Optional[int] = None,
         variables: Optional[str] = None,
         query_id: str = "",
     ) -> str:
-        # Default date range: last 7 days
+        # Default date range: last 7 days or specified days
         today = datetime.now()
-        if not end_date:
+        if days and not start_date:
             end_date = today.strftime("%Y-%m-%d")
-        if not start_date:
-            start_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+            start_date = (today - timedelta(days=days)).strftime("%Y-%m-%d")
+        else:
+            if not end_date:
+                end_date = today.strftime("%Y-%m-%d")
+            if not start_date:
+                start_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")
         if not variables:
             variables = "temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max"
 
